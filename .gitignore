@@ -1,0 +1,29 @@
+# Build outputs
+build/
+.gradle/
+*.class
+
+# Android
+local.properties
+*.jks
+*.keystore
+
+# Kotlin/Native
+*.klib
+*.a
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Gradle wrapper jar (committed separately by teams that prefer it)
+# gradle/wrapper/gradle-wrapper.jar
+
+# OS
+*.swp
+*.swo
+~$*

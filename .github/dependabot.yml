@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cron: "0 4 * * 1-7"
+    open-pull-requests-limit: 100
+    labels:
+      - "dependencies"
+      - "automatic-merge"
+      - "kotlin"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cron: "0 7 * * 1-7"
+    open-pull-requests-limit: 100
+    labels:
+      - "dependencies"
+      - "automatic-merge"
+      - "github-actions"

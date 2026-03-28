@@ -1,0 +1,4 @@
+# Discogs OAuth credentials — NEVER commit this file
+# Obtain your keys at https://www.discogs.com/settings/developers
+discogs.consumerKey=YOUR_CONSUMER_KEY_HERE
+discogs.consumerSecret=YOUR_CONSUMER_SECRET_HERE

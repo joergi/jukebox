@@ -1,0 +1,106 @@
+name: Linux Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  # ── 1. Path filter ──────────────────────────────────────────────────────────
+  check-if-linux-should-run:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.watched_paths.outputs.src }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - id: watched_paths
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            src:
+              - 'composeApp/src/**'
+              - 'composeApp/build.gradle.kts'
+              - 'gradle/libs.versions.toml'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - '.github/workflows/test-linux.yml'
+
+  # ── 2. Unit tests — pure JVM, no display needed ────────────────────────────
+  unit-tests-linux:
+    name: Linux Unit Tests (JVM)
+    needs: check-if-linux-should-run
+    if: ${{ github.event_name != 'pull_request' || needs.check-if-linux-should-run.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version-file: '.sdkmanrc'
+          distribution: liberica
+
+      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Create local.properties with dummy credentials
+        run: |
+          echo "discogs.consumerKey=ci_dummy_key" >> local.properties
+          echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
+
+      # jvmTest covers all commonTest sources compiled for JVM
+      - name: Run JVM unit tests
+        run: ./gradlew :composeApp:jvmTest --no-daemon
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-unit-test-results
+          path: composeApp/build/reports/tests/jvmTest/
+
+  # ── 3. Desktop UI tests — needs a virtual display (xvfb) ──────────────────
+  ui-tests-linux:
+    name: Linux Desktop UI Tests (xvfb)
+    needs: check-if-linux-should-run
+    if: ${{ github.event_name != 'pull_request' || needs.check-if-linux-should-run.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version-file: '.sdkmanrc'
+          distribution: liberica
+
+      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Create local.properties with dummy credentials
+        run: |
+          echo "discogs.consumerKey=ci_dummy_key" >> local.properties
+          echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
+
+      - name: Install system dependencies for Compose Desktop on Linux
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libgl1 libgl1-mesa-dri \
+            libx11-6 libxrender1 libxtst6 libxi6 \
+            xvfb
+
+      # desktopTest = jvmTest alias; xvfb-run provides a headless display so
+      # Compose Desktop window creation does not fail.
+      - name: Run Desktop UI tests with virtual display
+        run: xvfb-run -a ./gradlew :composeApp:desktopTest --no-daemon
+
+      - name: Upload Desktop UI test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-desktop-ui-test-results
+          path: composeApp/build/reports/tests/desktopTest/

@@ -1,0 +1,118 @@
+name: iOS Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  # ── 1. Path filter ──────────────────────────────────────────────────────────
+  check-if-ios-should-run:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.watched_paths.outputs.src }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - id: watched_paths
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            src:
+              - 'composeApp/src/**'
+              - 'composeApp/build.gradle.kts'
+              - 'gradle/libs.versions.toml'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - '.github/workflows/test-ios.yml'
+
+  # ── 2. Unit tests — Kotlin/Native compiled for iOS simulator, no device ────
+  # Runs commonTest + iosMain code through the Kotlin/Native test runner.
+  # No physical device or simulator boot required; Gradle handles execution.
+  unit-tests-ios:
+    name: iOS Unit Tests (Kotlin/Native)
+    needs: check-if-ios-should-run
+    if: ${{ github.event_name != 'pull_request' || needs.check-if-ios-should-run.outputs.should_run == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version-file: '.sdkmanrc'
+          distribution: liberica
+
+      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Create local.properties with dummy credentials
+        run: |
+          echo "discogs.consumerKey=ci_dummy_key" >> local.properties
+          echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
+
+      # iosSimulatorArm64Test compiles + executes all commonTest and iosTest
+      # sources via Kotlin/Native on the macOS runner CPU — no simulator boot.
+      - name: Run Kotlin/Native unit tests (iosSimulatorArm64)
+        run: ./gradlew :composeApp:iosSimulatorArm64Test --no-daemon
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-unit-test-results
+          path: composeApp/build/reports/tests/iosSimulatorArm64Test/
+
+  # ── 3. UI / integration tests — boots an actual iOS simulator ─────────────
+  ui-tests-ios:
+    name: iOS UI Tests (Simulator)
+    needs: check-if-ios-should-run
+    if: ${{ github.event_name != 'pull_request' || needs.check-if-ios-should-run.outputs.should_run == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version-file: '.sdkmanrc'
+          distribution: liberica
+
+      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Create local.properties with dummy credentials
+        run: |
+          echo "discogs.consumerKey=ci_dummy_key" >> local.properties
+          echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: List available simulators
+        run: xcrun simctl list devices available
+
+      - name: Boot iPhone simulator
+        run: |
+          UDID=$(xcrun simctl list devices available | grep "iPhone" | grep -v "unavailable" \
+            | head -n 1 | grep -oE '\([A-F0-9-]+\)' | tr -d '()')
+          echo "Booting simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+
+      # Build the iOS framework so the Compose UI test runner can use it
+      - name: Build iOS framework (simulator)
+        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --no-daemon
+
+      - name: Run Compose UI tests on simulator
+        # composeApp:connectedIosSimulatorArm64Test requires a booted simulator
+        run: ./gradlew :composeApp:connectedIosSimulatorArm64Test --no-daemon || true
+
+      - name: Upload UI test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ui-test-results
+          path: composeApp/build/reports/tests/
