@@ -4,7 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "cron"
-      cron: "0 4 * * 1-7"
+      cronjob: "0 4 * * 1-7"
     open-pull-requests-limit: 100
     labels:
       - "dependencies"
@@ -15,7 +15,7 @@ updates:
     directory: "/"
     schedule:
       interval: "cron"
-      cron: "0 7 * * 1-7"
+      cronjob: "0 7 * * 1-7"
     open-pull-requests-limit: 100
     labels:
       - "dependencies"
