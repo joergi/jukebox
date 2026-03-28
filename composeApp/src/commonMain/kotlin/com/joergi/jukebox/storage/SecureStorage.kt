@@ -20,4 +20,5 @@ object StorageKeys {
     const val ACCESS_TOKEN = "discogs_access_token"
     const val ACCESS_TOKEN_SECRET = "discogs_access_token_secret"
     const val USERNAME = "discogs_username"
+    fun collectionCache(username: String) = "collection_cache_$username"
 }

@@ -35,7 +35,7 @@ Send that file to your device and install it (allow installs from unknown source
 ### Desktop (JVM)
 
 Run locally:
-```
+```bash
 ./gradlew :composeApp:run
 ```
 

@@ -66,7 +66,11 @@ fun App(
                 val route = backStackEntry.toRoute<CollectionRoute>()
 
                 val collectionViewModel = remember(route.username) {
-                    CollectionViewModel(service = service, username = route.username)
+                    CollectionViewModel(
+                        service = service,
+                        username = route.username,
+                        storage = storage,
+                    )
                 }
 
                 CollectionScreen(
