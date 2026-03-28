@@ -41,7 +41,7 @@ jobs:
           java-version-file: '.sdkmanrc'
           distribution: liberica
 
-      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+      - uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
@@ -76,7 +76,7 @@ jobs:
           java-version-file: '.sdkmanrc'
           distribution: liberica
 
-      - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+      - uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
