@@ -16,6 +16,7 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okio.Path.Companion.toPath
 import java.awt.Desktop
@@ -26,8 +27,9 @@ import java.util.Properties
 fun main() = application {
     // ── Read credentials ──────────────────────────────────────────────────────
     val localProps = Properties().also { props ->
-        val f = File("local.properties")
-        if (f.exists()) props.load(f.inputStream())
+        val f = listOf(File("local.properties"), File("../local.properties"))
+            .firstOrNull { it.exists() }
+        if (f != null) props.load(f.inputStream())
     }
     val consumerKey = localProps.getProperty("discogs.consumerKey", "")
     val consumerSecret = localProps.getProperty("discogs.consumerSecret", "")
@@ -59,8 +61,20 @@ fun main() = application {
     val storage = SecureStorage(dataStore)
 
     val openUrl: suspend (String) -> Unit = { url ->
-        if (Desktop.isDesktopSupported()) {
-            Desktop.getDesktop().browse(URI(url))
+        withContext(Dispatchers.IO) {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                Desktop.getDesktop().browse(URI(url))
+            } else {
+                // Fallback: try xdg-open / open on platforms where Desktop.browse isn't supported
+                val os = System.getProperty("os.name").lowercase()
+                val cmd = when {
+                    os.contains("linux") -> arrayOf("xdg-open", url)
+                    os.contains("mac") -> arrayOf("open", url)
+                    os.contains("win") -> arrayOf("cmd", "/c", "start", url)
+                    else -> null
+                }
+                cmd?.let { Runtime.getRuntime().exec(it) }
+            }
         }
     }
 

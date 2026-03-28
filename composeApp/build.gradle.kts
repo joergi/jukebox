@@ -176,3 +176,10 @@ compose.desktop {
         }
     }
 }
+
+// Set working dir for :run to project root so local.properties is found.
+afterEvaluate {
+    tasks.withType<JavaExec>().configureEach {
+        if (name == "run") workingDir = rootProject.projectDir
+    }
+}
