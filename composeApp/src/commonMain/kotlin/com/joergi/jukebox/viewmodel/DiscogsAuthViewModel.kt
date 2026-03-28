@@ -73,9 +73,9 @@ class DiscogsAuthViewModel(
             runCatching { service.startOAuthFlow() }
                 .onSuccess { url ->
                     runCatching { openUrl(url) }
-                        .onFailure { _state.update { AuthState.Error("Could not open browser: ${it.message}") } }
+                        .onFailure { e -> _state.update { AuthState.Error("Could not open browser: ${e.message}") } }
                 }
-                .onFailure { _state.update { AuthState.Error("Failed to start login: ${it.message}") } }
+                .onFailure { e -> _state.update { AuthState.Error("Failed to start login: ${e.message}") } }
         }
     }
 
@@ -100,7 +100,7 @@ class DiscogsAuthViewModel(
                 username
             }
                 .onSuccess { username -> _state.update { AuthState.Authenticated(username) } }
-                .onFailure { _state.update { AuthState.Error("Login failed: ${it.message}") } }
+                .onFailure { e -> _state.update { AuthState.Error("Login failed: ${e.message}") } }
         }
     }
 

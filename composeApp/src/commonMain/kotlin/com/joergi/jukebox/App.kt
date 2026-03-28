@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.joergi.jukebox.service.DiscogsService
 import com.joergi.jukebox.storage.SecureStorage
 import com.joergi.jukebox.ui.screen.CollectionScreen
@@ -14,15 +15,15 @@ import com.joergi.jukebox.ui.screen.HomeScreen
 import com.joergi.jukebox.ui.theme.JukeboxTheme
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
+import kotlinx.serialization.Serializable
 
-// ── Navigation destinations ───────────────────────────────────────────────────
+// ── Typed navigation destinations ─────────────────────────────────────────────
 
-private object Routes {
-    const val HOME = "home"
-    const val COLLECTION = "collection/{username}"
+@Serializable
+internal data object HomeRoute
 
-    fun collection(username: String) = "collection/$username"
-}
+@Serializable
+internal data class CollectionRoute(val username: String)
 
 /**
  * Root composable.
@@ -51,21 +52,21 @@ fun App(
         // Restore any previously saved session on first composition
         LaunchedEffect(Unit) { authViewModel.restoreSession() }
 
-        NavHost(navController = navController, startDestination = Routes.HOME) {
-            composable(Routes.HOME) {
+        NavHost(navController = navController, startDestination = HomeRoute) {
+            composable<HomeRoute> {
                 HomeScreen(
                     viewModel = authViewModel,
                     onNavigateToCollection = { username ->
-                        navController.navigate(Routes.collection(username))
+                        navController.navigate(CollectionRoute(username))
                     },
                 )
             }
 
-            composable(Routes.COLLECTION) { backStackEntry ->
-                val username = backStackEntry.arguments?.getString("username") ?: return@composable
+            composable<CollectionRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<CollectionRoute>()
 
-                val collectionViewModel = remember(username) {
-                    CollectionViewModel(service = service, username = username)
+                val collectionViewModel = remember(route.username) {
+                    CollectionViewModel(service = service, username = route.username)
                 }
 
                 CollectionScreen(

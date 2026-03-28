@@ -32,6 +32,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -42,7 +43,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.SubcomposeAsyncImageContent
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -241,7 +244,7 @@ private fun Thumbnail(thumbUrl: String?) {
         contentAlignment = Alignment.Center,
     ) {
         if (thumbUrl != null) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(thumbUrl)
                     .crossfade(true)
@@ -249,14 +252,18 @@ private fun Thumbnail(thumbUrl: String?) {
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-                error = {
-                    Icon(
-                        imageVector = Icons.Default.BrokenImage,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                    )
-                },
-            )
+            ) {
+                when (painter.state.collectAsState().value) {
+                    is AsyncImagePainter.State.Error, is AsyncImagePainter.State.Empty -> {
+                        Icon(
+                            imageVector = Icons.Default.BrokenImage,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                        )
+                    }
+                    else -> SubcomposeAsyncImageContent()
+                }
+            }
         } else {
             Icon(
                 imageVector = Icons.Default.MusicNote,

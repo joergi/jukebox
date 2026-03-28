@@ -24,7 +24,11 @@ kotlin {
 
     androidTarget {
         compilations.all {
-            kotlinOptions { jvmTarget = "11" }
+            compileTaskProvider.configure {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+                }
+            }
         }
     }
 
@@ -129,12 +133,12 @@ kotlin {
 
 android {
     namespace = "com.joergi.jukebox"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.joergi.jukebox"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
 
