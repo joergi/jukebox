@@ -210,7 +210,123 @@ class CollectionViewModelTest {
         callCount shouldBe 2
     }
 
-    // ── isEmpty ───────────────────────────────────────────────────────────────
+    // ── filterLetter ──────────────────────────────────────────────────────────
+
+    @Test
+    fun `filterLetter loads all remaining pages when filter is set`() = runTest {
+        var callCount = 0
+        val engine = MockEngine { _ ->
+            callCount++
+            val json = when (callCount) {
+                1 -> """
+                    {"pagination":{"pages":3,"items":6},"releases":[
+                      {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl"}]}},
+                      {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl"}]}}
+                    ]}
+                """.trimIndent()
+                2 -> """
+                    {"pagination":{"pages":3,"items":6},"releases":[
+                      {"instance_id":3,"id":3,"basic_information":{"title":"B2","artists":[{"name":"Bravo"}],"formats":[{"name":"Vinyl"}]}},
+                      {"instance_id":4,"id":4,"basic_information":{"title":"C1","artists":[{"name":"Charlie"}],"formats":[{"name":"Vinyl"}]}}
+                    ]}
+                """.trimIndent()
+                else -> """
+                    {"pagination":{"pages":3,"items":6},"releases":[
+                      {"instance_id":5,"id":5,"basic_information":{"title":"B3","artists":[{"name":"Bongo"}],"formats":[{"name":"Vinyl"}]}},
+                      {"instance_id":6,"id":6,"basic_information":{"title":"D1","artists":[{"name":"Delta"}],"formats":[{"name":"Vinyl"}]}}
+                    ]}
+                """.trimIndent()
+            }
+            respond(json, HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val vm = makeViewModel(engine)
+
+        vm.uiState.test {
+            awaitItem() // loading page 1
+            val page1 = awaitItem()
+            page1.items shouldHaveSize 2
+            page1.hasMore shouldBe true
+
+            // Setting a filter emits a state update for selectedFilter first,
+            // then triggers loading of all remaining pages automatically.
+            vm.filterLetter('B')
+
+            // State with selectedFilter='B' but still only page1 items
+            val withFilter = awaitItem()
+            withFilter.selectedFilter shouldBe 'B'
+            withFilter.items shouldHaveSize 2
+
+            // Pages 2 and 3 should be fetched automatically
+            awaitItem() // loading page 2
+            val page2 = awaitItem()
+            page2.items shouldHaveSize 4
+
+            awaitItem() // loading page 3
+            val page3 = awaitItem()
+            page3.items shouldHaveSize 6
+            page3.hasMore shouldBe false
+
+            // Filtered items should include all 3 "B" artists across all pages
+            page3.filteredItems shouldHaveSize 3
+        }
+
+        callCount shouldBe 3
+    }
+
+    @Test
+    fun `filterLetter null does not trigger extra page loads`() = runTest {
+        var callCount = 0
+        val engine = MockEngine { _ ->
+            callCount++
+            respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val vm = makeViewModel(engine)
+
+        vm.uiState.test {
+            awaitItem() // loading
+            awaitItem() // loaded
+
+            vm.filterLetter(null)
+            // Clearing filter (null) should not trigger any additional network calls
+            expectNoEvents()
+        }
+
+        callCount shouldBe 1
+    }
+
+    @Test
+    fun `filterLetter shows all loaded items when collection is already fully loaded`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """
+                {"pagination":{"pages":1,"items":3},"releases":[
+                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl"}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl"}]}},
+                  {"instance_id":3,"id":3,"basic_information":{"title":"B2","artists":[{"name":"Bravo"}],"formats":[{"name":"Vinyl"}]}}
+                ]}
+                """.trimIndent(),
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val vm = makeViewModel(engine)
+
+        vm.uiState.test {
+            awaitItem() // loading
+            val loaded = awaitItem()
+            loaded.items shouldHaveSize 3
+            loaded.hasMore shouldBe false
+
+            vm.filterLetter('B')
+            // No extra pages to load; filter is applied immediately
+            val filtered = awaitItem()
+            filtered.selectedFilter shouldBe 'B'
+            filtered.filteredItems shouldHaveSize 2
+        }
+    }
 
     @Test
     fun `isEmpty is true when no items and no loading and no error`() {

@@ -1,8 +1,12 @@
 package com.joergi.jukebox.ui.screen
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
@@ -26,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -38,8 +44,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,11 +65,13 @@ import coil3.request.crossfade
 import com.joergi.jukebox.model.CollectionItem
 import com.joergi.jukebox.viewmodel.CollectionUiState
 import com.joergi.jukebox.viewmodel.CollectionViewModel
+import com.joergi.jukebox.viewmodel.LetterFilter
 
 /**
  * Shows the authenticated user's Discogs vinyl collection.
  *
  * Mirrors Flutter's CollectionScreen with pull-to-refresh and infinite scroll.
+ * The alphabet bar at the bottom lets the user filter by first letter of the artist name.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,12 +123,33 @@ fun CollectionScreen(
                 ),
             )
         },
+        bottomBar = {
+            AlphabetBar(
+                selectedFilter = uiState.selectedFilter,
+                onFilterSelected = { viewModel.filterLetter(it) },
+            )
+        },
+        // Capture keyboard events for letter filtering at the Scaffold level
+        modifier = Modifier.onKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+            when {
+                event.key == Key.Escape -> { viewModel.filterLetter(null); true }
+                event.key == Key.Zero || event.key == Key.NumPad0 -> {
+                    viewModel.filterLetter(LetterFilter.NUMBERS); true
+                }
+                else -> {
+                    val char = keyToLetter(event.key, event.isShiftPressed)
+                    if (char != null) { viewModel.filterLetter(char); true } else false
+                }
+            }
+        },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = uiState.isLoading && uiState.items.isEmpty(),
             onRefresh = { viewModel.refresh() },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
+            val displayItems = uiState.filteredItems
             when {
                 uiState.items.isEmpty() && uiState.isLoading -> LoadingPlaceholder()
                 uiState.items.isEmpty() && uiState.error != null -> CollectionError(
@@ -121,8 +157,11 @@ fun CollectionScreen(
                     onRetry = { viewModel.refresh() },
                 )
                 uiState.isEmpty -> EmptyCollection()
+                displayItems.isEmpty() && uiState.selectedFilter != null && uiState.isLoading -> LoadingPlaceholder()
+                displayItems.isEmpty() && uiState.selectedFilter != null -> EmptyFilterResult(uiState.selectedFilter)
                 else -> CollectionList(
                     uiState = uiState,
+                    displayItems = displayItems,
                     listState = listState,
                 )
             }
@@ -130,11 +169,110 @@ fun CollectionScreen(
     }
 }
 
+// ── Alphabet bar ──────────────────────────────────────────────────────────────
+
+private val LETTERS = ('A'..'Z').toList()
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AlphabetBar(
+    selectedFilter: Any?,
+    onFilterSelected: (Any?) -> Unit,
+) {
+    Surface(
+        tonalElevation = 4.dp,
+        shadowElevation = 4.dp,
+    ) {
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            // All-button (clear filter)
+            FilterChip(
+                label = "All",
+                selected = selectedFilter == null,
+                onClick = { onFilterSelected(null) },
+            )
+            // A–Z
+            LETTERS.forEach { letter ->
+                FilterChip(
+                    label = letter.toString(),
+                    selected = selectedFilter == letter,
+                    onClick = {
+                        onFilterSelected(if (selectedFilter == letter) null else letter)
+                    },
+                )
+            }
+            // Numbers (#)
+            FilterChip(
+                label = "#",
+                selected = selectedFilter == LetterFilter.NUMBERS,
+                onClick = {
+                    onFilterSelected(
+                        if (selectedFilter == LetterFilter.NUMBERS) null else LetterFilter.NUMBERS
+                    )
+                },
+            )
+            // Special characters (?)
+            FilterChip(
+                label = "?",
+                selected = selectedFilter == LetterFilter.SPECIAL,
+                onClick = {
+                    onFilterSelected(
+                        if (selectedFilter == LetterFilter.SPECIAL) null else LetterFilter.SPECIAL
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+
+    Box(
+        modifier = Modifier
+            .padding(2.dp)
+            .background(bg, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = fg,
+        )
+    }
+}
+
+// Maps a Compose Key to a letter Char (A–Z). Returns null for non-letter keys.
+private fun keyToLetter(key: Key, shiftPressed: Boolean): Char? {
+    // Key.A through Key.Z have sequential key codes in the Android/Compose key set
+    val letters = listOf(
+        Key.A, Key.B, Key.C, Key.D, Key.E, Key.F, Key.G, Key.H, Key.I, Key.J,
+        Key.K, Key.L, Key.M, Key.N, Key.O, Key.P, Key.Q, Key.R, Key.S, Key.T,
+        Key.U, Key.V, Key.W, Key.X, Key.Y, Key.Z,
+    )
+    val index = letters.indexOf(key)
+    return if (index >= 0) ('A' + index).toChar() else null
+}
+
 // ── List ──────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun CollectionList(
     uiState: CollectionUiState,
+    displayItems: List<CollectionItem>,
     listState: androidx.compose.foundation.lazy.LazyListState,
 ) {
     LazyColumn(
@@ -143,16 +281,16 @@ private fun CollectionList(
         modifier = Modifier.fillMaxSize(),
     ) {
         itemsIndexed(
-            items = uiState.items,
+            items = displayItems,
             key = { _, item -> item.instanceId },
         ) { index, item ->
             CollectionItemRow(item = item)
-            if (index < uiState.items.lastIndex) {
+            if (index < displayItems.lastIndex) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
 
-        // Footer: loading spinner or error for subsequent pages
+        // Footer: loading spinner or error for subsequent pages (only when unfiltered)
         if (uiState.isLoading && uiState.items.isNotEmpty()) {
             item {
                 Box(
@@ -166,7 +304,7 @@ private fun CollectionList(
         if (uiState.error != null && uiState.items.isNotEmpty()) {
             item {
                 Text(
-                    text = uiState.error!!,
+                    text = uiState.error.orEmpty(),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -299,6 +437,27 @@ private fun EmptyCollection() {
         )
         Spacer(Modifier.height(16.dp))
         Text("Your collection is empty.", style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun EmptyFilterResult(filter: Any?) {
+    val label = when (filter) {
+        is Char -> filter.toString()
+        LetterFilter.NUMBERS -> "#"
+        LetterFilter.SPECIAL -> "?"
+        else -> ""
+    }
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "No artists starting with \"$label\"",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
     }
 }
 

@@ -168,8 +168,8 @@ class DiscogsService(
             queryParams = mapOf(
                 "page" to "$page",
                 "per_page" to "$perPage",
-                "sort" to "added",
-                "sort_order" to "desc",
+                "sort" to "artist",
+                "sort_order" to "asc",
             ),
         )
         return CollectionResult(
