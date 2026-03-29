@@ -3,9 +3,17 @@ package com.joergi.jukebox.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.joergi.jukebox.model.CollectionItem
+import com.joergi.jukebox.model.CollectionSyncMetadata
+import com.joergi.jukebox.model.SyncState
+import com.joergi.jukebox.model.formatSyncTime
 import com.joergi.jukebox.service.DiscogsService
+import com.joergi.jukebox.service.NotificationService
 import com.joergi.jukebox.storage.SecureStorage
 import com.joergi.jukebox.storage.StorageKeys
+import com.joergi.jukebox.util.Logger
+import com.joergi.jukebox.util.TimeProvider
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +47,10 @@ data class CollectionUiState(
      * null = not fetching (either done or not started yet).
      */
     val syncProgress: Float? = null,
+    // Synchronization fields
+    val syncState: SyncState = SyncState.Idle,
+    val syncMetadata: CollectionSyncMetadata? = null,
+    val newRecordsCount: Int = 0,
 ) {
     val hasMore: Boolean get() = currentPage < totalPages
     val isEmpty: Boolean get() = items.isEmpty() && !isLoading && error == null
@@ -82,6 +94,7 @@ class CollectionViewModel(
     private val username: String,
     private val readCache: suspend () -> String?,
     private val writeCache: suspend (String) -> Unit,
+    private val storage: SecureStorage? = null,
     private val perPage: Int = 50,
 ) : ViewModel() {
 
@@ -96,17 +109,31 @@ class CollectionViewModel(
         username = username,
         readCache = { storage.read(StorageKeys.collectionCache(username)) },
         writeCache = { json -> storage.write(StorageKeys.collectionCache(username), json) },
+        storage = storage,
         perPage = perPage,
     )
 
     private val _uiState = MutableStateFlow(CollectionUiState())
     val uiState: StateFlow<CollectionUiState> = _uiState.asStateFlow()
 
+    // Synchronization state
+    private var syncTimer: Job? = null
+    private companion object {
+        private const val SYNC_INTERVAL_MS = 3 * 60 * 60 * 1000L  // 3 hours
+    }
+
     init {
         viewModelScope.launch {
             restoreFromCache()
-            syncAllPages()
+            // Start incremental sync
+            performIncrementalSync()
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        syncTimer?.cancel()
+        syncTimer = null
     }
 
     // ── Cache ─────────────────────────────────────────────────────────────────
@@ -188,6 +215,286 @@ class CollectionViewModel(
         persistToCache(allItems)
     }
 
+    // ── Incremental Sync ──────────────────────────────────────────────────────
+
+    /**
+     * Main entry point for incremental collection synchronization.
+     * Coordinates all 4 phases of the sync process:
+     * 1. Load cached collection
+     * 2. Fetch newest 50 records
+     * 3. Merge & validate
+     * 4. Full resync (if validation fails)
+     *
+     * Called automatically on app launch and every 3 hours thereafter.
+     * Non-blocking: users can continue using the app during sync.
+     */
+    suspend fun performIncrementalSync() {
+        // Guard: only one sync at a time
+        val currentState = _uiState.value.syncState
+        if (currentState !is SyncState.Idle && currentState !is SyncState.Complete) {
+            log("CollectionSync", "Sync already in progress, skipping")
+            return
+        }
+
+        try {
+            // Phase 1: Load cached collection
+            _uiState.update { it.copy(syncState = SyncState.LoadingCache) }
+            loadCachedCollection()
+
+            val oldCount = _uiState.value.items.size
+
+            // Phase 2: Fetch newest 50
+            _uiState.update { it.copy(syncState = SyncState.FetchingNewest) }
+            fetchNewestFifty()
+
+            // Phase 3: Merge & validate
+            _uiState.update { it.copy(syncState = SyncState.Validating) }
+            mergeAndValidate(oldCount)
+
+            _uiState.update { it.copy(syncState = SyncState.Complete) }
+
+            // Schedule next sync in 3 hours
+            scheduleNextSync()
+
+        } catch (e: Exception) {
+            log("CollectionSync", "Sync failed: ${e.message}", e)
+            _uiState.update { it.copy(syncState = SyncState.Error("Sync failed: ${e.message}", e)) }
+        }
+    }
+
+    /**
+     * Phase 1: Load collection from local cache
+     * Goal: Display data to user immediately (<100ms)
+     * Non-blocking, happens instantly from device storage
+     */
+    private suspend fun loadCachedCollection() {
+        try {
+            val json = readCache()
+            val cachedCollection = json?.let {
+                runCatching {
+                    cacheJson.decodeFromString<List<CollectionItem>>(it)
+                }.getOrNull() ?: emptyList()
+            } ?: emptyList()
+
+            val metadata = storage?.loadCollectionSyncMetadata(username)
+
+            _uiState.update { state ->
+                state.copy(
+                    items = cachedCollection,
+                    totalItems = cachedCollection.size,
+                    syncMetadata = metadata,
+                )
+            }
+
+            log("CollectionSync", "Phase 1: Loaded ${cachedCollection.size} records from cache")
+        } catch (e: Exception) {
+            log("CollectionSync", "Phase 1: Failed to load cache: ${e.message}", e)
+            // Continue with empty collection
+            _uiState.update { it.copy(items = emptyList()) }
+        }
+    }
+
+    /**
+     * Phase 2: Fetch newest 50 records from API
+     * Goal: Detect if new records were added since last sync
+     * Stores result separately (not merged yet)
+     */
+    private suspend fun fetchNewestFifty() {
+        try {
+            val newest = service.fetchNewestFiftyRecords(username)
+            log("CollectionSync", "Phase 2: Fetched ${newest.size} newest records")
+        } catch (e: Exception) {
+            log("CollectionSync", "Phase 2: Failed to fetch newest records: ${e.message}", e)
+            throw e
+        }
+    }
+
+    /**
+     * Phase 3: Merge new records with cached collection and validate
+     *
+     * Process:
+     * 1. Detect new records (in newest 50 but not in cache)
+     * 2. Detect removed records (in cache but not in newest 50)
+     * 3. Merge: remove deleted, add new, re-sort by artist ASC
+     * 4. Validate: check total count matches API
+     * 5. If validation passes: save merged collection and metadata
+     * 6. If validation fails: trigger full resync (Phase 4)
+     *
+     * @param oldCount Size of cached collection before sync
+     */
+    private suspend fun mergeAndValidate(oldCount: Int) {
+        val cachedCollection = _uiState.value.items
+
+        // For now, since we don't have newest fifty stored, do a full refetch
+        val newestFifty = service.fetchNewestFiftyRecords(username)
+
+        // Detect changes
+        val newRecords = detectNewRecords(cachedCollection, newestFifty)
+        val removedRecords = detectRemovedRecords(cachedCollection, newestFifty)
+
+        log("CollectionSync", "Phase 3: Found ${newRecords.size} new, ${removedRecords.size} removed")
+
+        // Merge
+        val removedIds = removedRecords.map { it.id }.toSet()
+        val merged = (cachedCollection.filter { it.id !in removedIds } + newRecords)
+            .sortedBy { it.artists.firstOrNull() ?: it.title }
+
+        // Validate
+        val expectedTotal = oldCount + newRecords.size - removedRecords.size
+
+        try {
+            val actualTotal = service.getCollectionMetadata(username)
+
+            if (expectedTotal != actualTotal) {
+                log("CollectionSync",
+                    "Phase 3: Validation FAILED - expected=$expectedTotal, actual=$actualTotal")
+
+                // Validation failed - trigger full resync
+                performFullResync()
+                return
+            }
+        } catch (e: Exception) {
+            log("CollectionSync", "Phase 3: Failed to get metadata for validation: ${e.message}", e)
+            throw e
+        }
+
+        // Validation passed - save merged collection
+        val newMetadata = CollectionSyncMetadata(
+            totalCount = merged.size,
+            lastSyncedAt = TimeProvider.currentTimeMillis(),
+            newestFiftyIds = newestFifty.map { it.id },
+            newRecordsCount = newRecords.size
+        )
+
+        persistToCache(merged)
+        storage?.saveCollectionSyncMetadata(username, newMetadata)
+        storage?.saveNewestFiftyIds(username, newRecords.map { it.id })
+
+        _uiState.update { state ->
+            state.copy(
+                items = merged,
+                totalItems = merged.size,
+                syncMetadata = newMetadata,
+                newRecordsCount = newRecords.size,
+            )
+        }
+
+        log("CollectionSync", "Phase 3: Validation PASSED, merged collection saved")
+
+        // Show notification if new records detected
+        if (newRecords.isNotEmpty()) {
+            NotificationService.showNewRecordsNotification(newRecords.size)
+        }
+    }
+
+    /**
+     * Phase 4: Full collection resync (triggered when Phase 3 validation fails)
+     *
+     * Process:
+     * 1. Fetch ALL collection records (paginated)
+     * 2. Sort by artist ASC
+     * 3. Replace cache entirely
+     * 4. Update metadata
+     * 5. Return to normal state
+     */
+    private suspend fun performFullResync() {
+        _uiState.update { it.copy(syncState = SyncState.FullResync) }
+
+        try {
+            log("CollectionSync", "Phase 4: Starting full resync")
+
+            val allRecords = service.fetchAllCollectionRecords(
+                username,
+                sortBy = "artist",
+                sortOrder = "asc"
+            )
+
+            val newMetadata = CollectionSyncMetadata(
+                totalCount = allRecords.size,
+                lastSyncedAt = TimeProvider.currentTimeMillis(),
+                lastFullSyncAt = TimeProvider.currentTimeMillis(),
+                newestFiftyIds = allRecords.take(50).map { it.id }
+            )
+
+            persistToCache(allRecords)
+            storage?.saveCollectionSyncMetadata(username, newMetadata)
+
+            _uiState.update { state ->
+                state.copy(
+                    items = allRecords,
+                    totalItems = allRecords.size,
+                    syncMetadata = newMetadata,
+                )
+            }
+
+            log("CollectionSync", "Phase 4: Full resync complete, ${allRecords.size} records")
+
+        } catch (e: Exception) {
+            log("CollectionSync", "Phase 4: Full resync failed: ${e.message}", e)
+            throw e
+        }
+    }
+
+    /**
+     * Identifies records in the newest 50 that are NOT in the cached collection.
+     * These are records that were added to the collection since last sync.
+     */
+    private fun detectNewRecords(
+        cachedCollection: List<CollectionItem>,
+        newestFifty: List<CollectionItem>
+    ): List<CollectionItem> {
+        val cachedIds = cachedCollection.map { it.id }.toSet()
+        return newestFifty.filter { it.id !in cachedIds }
+    }
+
+    /**
+     * Identifies records in the cached collection that are NOT in the newest 50.
+     * These are records that were removed from the collection.
+     */
+    private fun detectRemovedRecords(
+        cachedCollection: List<CollectionItem>,
+        newestFifty: List<CollectionItem>
+    ): List<CollectionItem> {
+        val newestIds = newestFifty.map { it.id }.toSet()
+        return cachedCollection.filter { cached ->
+            cached.id !in newestIds
+        }
+    }
+
+    /**
+     * Schedules the next incremental sync in 3 hours.
+     * Only active if app remains open. Cancels if app is backgrounded.
+     */
+    private fun scheduleNextSync() {
+        syncTimer?.cancel()
+
+        syncTimer = viewModelScope.launch {
+            delay(SYNC_INTERVAL_MS)
+            log("CollectionSync", "3-hour sync interval reached, triggering sync")
+            performIncrementalSync()
+        }
+
+        log("CollectionSync", "Scheduled next sync in 3 hours")
+    }
+
+    /**
+     * Triggered when user taps the refresh button.
+     * Performs a full resync immediately, replacing cached data completely.
+     */
+    fun performManualSync() {
+        viewModelScope.launch {
+            try {
+                performFullResync()
+                _uiState.update { it.copy(syncState = SyncState.Complete) }
+                scheduleNextSync()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncState = SyncState.Error("Manual sync failed: ${e.message}", e)) }
+            }
+        }
+    }
+
+    // ── Full sync ─────────────────────────────────────────────────────────────
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     fun refresh() {
@@ -220,4 +527,10 @@ class CollectionViewModel(
 
     // loadNextPage kept for backward-compat (infinite scroll trigger still calls it)
     fun loadNextPage() { /* no-op: sync is now driven by syncAllPages */ }
+}
+
+// ── Logging helper ────────────────────────────────────────────────────────────
+
+private fun log(tag: String, message: String, exception: Throwable? = null) {
+    Logger.d(tag, message, exception)
 }

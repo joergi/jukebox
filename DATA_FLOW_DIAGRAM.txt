@@ -1,0 +1,256 @@
+================================================================================
+                          JUKEBOX KMP - DATA FLOW DIAGRAM
+================================================================================
+
+AUTHENTICATION FLOW
+================================================================================
+
+User                 HomeScreen            DiscogsAuthViewModel    DiscogsService
+ │                       │                        │                    │
+ ├─ "Connect" ────────→  │                        │                    │
+ │                       ├─ connectToDiscogs() ──→ │                    │
+ │                       │                        ├─ startOAuthFlow()→  │
+ │                       │                        │                    │
+ │                       │                        │  ┌─ GET /oauth/request_token
+ │                       │                        │  │ + OAuth header (nonce, timestamp, key)
+ │                       │                        │  └→ Discogs API
+ │                       │                        │← request_token, secret
+ │                       │                        │
+ │                       ├─ Show PIN Dialog ←────┤                    │
+ │                       │                        │← authorize_url     │
+ │                       │
+ │  (Opens browser externally to Discogs)
+ │  (User authorizes, gets PIN code)
+ │
+ │  (Pastes PIN) ─────→  │                        │                    │
+ │                       ├─ submitVerifier(PIN) →│                    │
+ │                       │                        ├─ completeOAuthFlow()→
+ │                       │                        │                    │
+ │                       │                        │  ┌─ POST /oauth/access_token
+ │                       │                        │  │ + OAuth header (request_token + verifier)
+ │                       │                        │  └→ Discogs API
+ │                       │                        │← access_token, secret
+ │                       │                        │
+ │                       │                        ├─ getIdentity() ──→  │
+ │                       │                        │                    │ GET /oauth/identity
+ │                       │                        │←─ username ─────────│
+ │                       │
+ │  Tokens + username saved to SecureStorage
+ │
+ ├─ "View Collection" ──→ CollectionScreen created
+ │
+
+COLLECTION LOADING FLOW
+================================================================================
+
+CollectionScreen Init      CollectionViewModel                    DiscogsService
+        │                          │                                    │
+        ├─ New VM ──────────────→  │                                    │
+        │                          ├─ restoreFromCache() ─────────────→ Storage
+        │                          │←─ JSON cached items ────────────── │
+        │                          │
+        │  (Deserialize JSON)      │
+        │←─ items displayed ───────│ (Show cached collection instantly!)
+        │  instantly               │
+        │                          ├─ syncAllPages() (background)
+        │                          │  iteration: page = 1 to totalPages
+        │                          │
+        │                          ├─ getCollection(username, page=1) →  │
+        │                          │                                    GET /users/{}/collection/...
+        │                          │                                    ?page=1&per_page=50
+        │                          │←─ (items, totalPages, totalItems)─ │
+        │                          │
+        │  Progress: 0.33 ────────→ (LinearProgressIndicator updates)
+        │
+        │                          ├─ getCollection(username, page=2) →
+        │                          │←─ more items ─────────────────────
+        │
+        │  Progress: 0.66 ────────→
+        │
+        │                          ├─ getCollection(username, page=3) →
+        │                          │←─ final items ───────────────────
+        │
+        │  Progress: null (done)───→
+        │
+        │                          ├─ persistToCache(allItems) ────────→ Storage
+        │                          │←─ OK ────────────────────────────
+        │
+
+FILTERING & DISPLAY
+================================================================================
+
+User                CollectionScreen              CollectionViewModel
+ │                      │                               │
+ ├─ Tap "A" ───────→    │                               │
+ │                      ├─ filterLetter('A') ──────────→│
+ │                      │                               ├─ filteredItems computed property
+ │                      │←─ StateFlow update ───────────┤ (filters in-memory, no API call)
+ │                      │
+ ├─ See A's only ←──────┤
+
+RANDOM PICK
+================================================================================
+
+User                CollectionScreen              CollectionViewModel
+ │                      │                               │
+ ├─ Tap Dice ──────→    │                               │
+ │                      ├─ pickRandom() ───────────────→│
+ │                      │                               ├─ Select random from items[]
+ │                      │←─ StateFlow: randomItem ──────┤
+ │                      │
+ ├─ Full-screen ←──────┤ (Shows overlay with album)
+ │  overlay
+ │
+
+STORAGE LAYER (Per-Platform)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Android                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│ SecureStorage                                                            │
+│ └─ EncryptedSharedPreferences                                           │
+│    └─ MasterKey (AES256-GCM, hardware-backed)                          │
+│       ├─ discogs_access_token       (encrypted on disk)                 │
+│       ├─ discogs_access_token_secret (encrypted on disk)                │
+│       ├─ discogs_username           (encrypted on disk)                 │
+│       └─ collection_cache_[user]    (encrypted JSON)                    │
+│                                                                          │
+│ File: /data/data/com.joergi.jukebox/shared_prefs/jukebox_secure_prefs   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Desktop (JVM)                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ SecureStorage                                                            │
+│ └─ DataStore<Preferences>                                               │
+│    ├─ discogs_access_token       (plaintext, not encrypted)             │
+│    ├─ discogs_access_token_secret (plaintext, not encrypted)            │
+│    ├─ discogs_username           (plaintext, not encrypted)             │
+│    └─ collection_cache_[user]    (plaintext JSON)                       │
+│                                                                          │
+│ File: ~/.jukebox/jukebox_prefs.preferences_pb (ProtoBuf format)         │
+│ ⚠️  Should use OS Keyring in production (libsecret/Keychain/CredMan)    │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              iOS                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ SecureStorage                                                            │
+│ └─ DataStore<Preferences> (simplified, should use Keychain)             │
+│    ├─ discogs_access_token       (currently simplified)                 │
+│    ├─ discogs_access_token_secret (currently simplified)                │
+│    ├─ discogs_username           (currently simplified)                 │
+│    └─ collection_cache_[user]    (simplified JSON)                      │
+│                                                                          │
+│ ⚠️  Should use native Keychain API or KeychainSwift library             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+HTTP CALL FLOW
+================================================================================
+
+HTTP Call:
+
+1. URL: https://api.discogs.com/users/{username}/collection/folders/0/releases
+   
+2. Query Parameters:
+   - page=1
+   - per_page=50
+   - sort=artist
+   - sort_order=asc
+
+3. Headers:
+   User-Agent: JukeboxKMP/1.0
+   Accept: application/vnd.discogs.v2.discogs+json
+   Authorization: OAuth oauth_consumer_key="...",
+                        oauth_nonce="123456789",
+                        oauth_token="access_token_here",
+                        oauth_signature="secret1&secret2",
+                        oauth_signature_method="PLAINTEXT",
+                        oauth_timestamp="1234567890"
+
+4. Response (JSON):
+   {
+     "pagination": {
+       "pages": 3,
+       "items": 145
+     },
+     "releases": [
+       {
+         "instance_id": 1,
+         "id": 100,
+         "basic_information": {
+           "title": "Abbey Road",
+           "artists": [{"name": "The Beatles"}],
+           "formats": [{"name": "Vinyl"}],
+           "thumb": "https://...",
+           "year": 1969,
+           "labels": [{"name": "Apple"}]
+         }
+       },
+       ...
+     ]
+   }
+
+5. Deserialization:
+   JSON → DiscogsReleaseJson
+       → DiscogsBasicInfoJson
+       → CollectionItem (UI model)
+
+6. UI Display:
+   CollectionItem fields rendered in LazyColumn
+
+STATE HIERARCHY
+================================================================================
+
+App.kt
+├─ NavController: HomeRoute | CollectionRoute
+│
+├─ HomeRoute → HomeScreen
+│               └─ DiscogsAuthViewModel
+│                  └─ StateFlow<AuthState>
+│                     ├─ Unauthenticated
+│                     ├─ Authenticating
+│                     ├─ Authenticated(username)
+│                     └─ Error(message)
+│
+└─ CollectionRoute(username) → CollectionScreen
+                               └─ CollectionViewModel
+                                  └─ StateFlow<CollectionUiState>
+                                     ├─ items: List<CollectionItem>
+                                     ├─ isLoading: Boolean
+                                     ├─ error: String?
+                                     ├─ currentPage: Int
+                                     ├─ totalPages: Int
+                                     ├─ selectedFilter: Any? (Char/LetterFilter)
+                                     ├─ randomItem: CollectionItem?
+                                     └─ syncProgress: Float?
+
+DEPENDENCY INJECTION CHAIN
+================================================================================
+
+Platform Entry Point
+(MainActivity / Main.kt)
+│
+├─ Read Discogs credentials from local.properties
+├─ Create HttpClient (platform-specific engine)
+├─ Create DiscogsService(consumerKey, secret, httpClient)
+├─ Create SecureStorage (platform-specific backend)
+├─ Create openUrl lambda (platform-specific browser launcher)
+│
+└─ setContent {
+     App(
+       service = DiscogsService,
+       storage = SecureStorage,
+       openUrl = lambda
+     )
+   }
+   │
+   ├─ Create DiscogsAuthViewModel(service, storage, openUrl)
+   │
+   └─ On navigation to CollectionRoute(username):
+       Create CollectionViewModel(service, username, storage)
+
+================================================================================
+END OF DIAGRAMS
+================================================================================

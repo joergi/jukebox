@@ -1,0 +1,340 @@
+================================================================================
+                    JUKEBOX_KMP ARCHITECTURE SUMMARY
+================================================================================
+
+PROJECT OVERVIEW
+----------------
+A Kotlin Multiplatform app for browsing Discogs vinyl collections
+Targets: Android, Desktop (JVM), iOS
+Built with: Compose Multiplatform, Ktor, kotlinx-serialization
+
+================================================================================
+1. CORE ARCHITECTURE LAYERS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              UI LAYER (Compose)                             │
+├─────────────────────────────┬───────────────────────────────────────────────┤
+│ HomeScreen                  │ CollectionScreen                              │
+│ - OAuth flow UI             │ - Album list with thumbnails                 │
+│ - PIN entry dialog          │ - Alphabet filter bar (A-Z, #, ?)            │
+│ - Auth state display        │ - Random pick feature                         │
+│ - Disconnect button         │ - Pull-to-refresh                            │
+│ - Error handling            │ - Sync progress indicator                    │
+└─────────────────────────────┴───────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        VIEWMODEL LAYER (State Management)                    │
+├─────────────────────────────┬───────────────────────────────────────────────┤
+│ DiscogsAuthViewModel        │ CollectionViewModel                           │
+│ - OAuth lifecycle           │ - Paginated fetching (50 items/page)          │
+│ - Token persistence         │ - Cache restore on startup                    │
+│ - Session restore           │ - Full background sync                        │
+│ - State machine (4 states)  │ - Letter-based filtering                      │
+│ - Uses: StateFlow<AuthState>│ - Uses: StateFlow<CollectionUiState>         │
+└─────────────────────────────┴───────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            SERVICE LAYER (Business Logic)                    │
+├─────────────────────────────┬───────────────────────────────────────────────┤
+│ DiscogsService              │ SecureStorage (platform-specific)             │
+│ - OAuth 1.0a PLAINTEXT      │ - Android: EncryptedSharedPreferences        │
+│ - startOAuthFlow()          │ - Desktop: DataStore Preferences             │
+│ - completeOAuthFlow()       │ - iOS: Keychain (simplified)                 │
+│ - getCollection()           │ - All: suspend read/write/delete             │
+│ - getIdentity()             │                                               │
+│ - Ktor HTTP client injected │                                               │
+└─────────────────────────────┴───────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              DATA MODELS                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ CollectionItem:                                                              │
+│   - instanceId, id, title, artists[], formats[], thumb, year, label        │
+│                                                                              │
+│ Discogs API JSON models (raw):                                             │
+│   - DiscogsCollectionResponse                                              │
+│   - DiscogsReleaseJson                                                     │
+│   - DiscogsBasicInfoJson                                                   │
+│   - Pagination info, artist, format, label details                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+2. DATA FLOW & PERSISTENCE STRATEGY
+================================================================================
+
+APP STARTUP
+-----------
+1. Platform entry point (MainActivity/Main.kt) creates:
+   - HttpClient with platform-specific engine
+   - DiscogsService (with consumer key/secret from local.properties)
+   - SecureStorage (platform-specific backend)
+   - openUrl lambda (browser launcher)
+
+2. App() composable initializes navigation:
+   - Create DiscogsAuthViewModel
+   - Call viewModel.restoreSession() to restore OAuth tokens from storage
+   - Navigate to HomeScreen
+
+OAUTH FLOW (First Time)
+-----------------------
+1. User clicks "Connect to Discogs"
+   → DiscogsService.startOAuthFlow() starts
+
+2. Step 1: GET /oauth/request_token (OAuth header with consumer key)
+   → Discogs returns: request token + secret
+   → Constructs: https://www.discogs.com/oauth/authorize?oauth_token=...
+   → App launches browser (platform-specific)
+
+3. User authorizes on Discogs website
+   → Discogs shows PIN code
+
+4. User pastes PIN into app
+   → DiscogsService.completeOAuthFlow(verifier) called
+
+5. Step 2: POST /oauth/access_token (OAuth header with request token + verifier)
+   → Discogs returns: access token + secret
+
+6. getIdentity() fetches username
+   → All three values stored in SecureStorage:
+     - discogs_access_token
+     - discogs_access_token_secret
+     - discogs_username
+
+7. State: Authenticated → navigate to CollectionScreen
+
+COLLECTION LOADING (Key Innovation)
+-----------------------------------
+On CollectionScreen creation:
+
+1. PHASE 1: INSTANT RESTORE (viewModel init)
+   ├─ readCache("collection_cache_username") from storage
+   ├─ Deserialize from JSON: List<CollectionItem>
+   ├─ Display cached items immediately ← USER SEES COLLECTION NOW
+   └─ Mark as "loaded" (totalPages = 1)
+
+2. PHASE 2: BACKGROUND FULL SYNC (simultaneous)
+   ├─ Loop through all pages (1 to totalPages):
+   │  ├─ service.getCollection(username, page, perPage=50)
+   │  ├─ Accumulate items
+   │  └─ Update UI with progress (0.0f → 1.0f)
+   ├─ On completion: persistToCache(allItems)
+   └─ Update UI: syncProgress = null (done)
+
+FILTERING (Client-Side)
+-----------------------
+Letter filter modifies displayed list (not fetched):
+- filteredItems = items.filter { matches selected letter/number/special }
+- No API calls needed
+- Fast, instant UI updates
+
+PULL-TO-REFRESH
+---------------
+User pulls down → viewModel.refresh()
+├─ Reset state but keep cached items visible
+├─ Restart syncAllPages() from page 1
+└─ User sees progress indicator while fetching
+
+================================================================================
+3. DISCOGS API DETAILS
+================================================================================
+
+OAUTH SIGNATURES (PLAINTEXT)
+-----------------------------
+OAuth Header Format:
+  Authorization: OAuth oauth_consumer_key="...", oauth_nonce="...",
+                        oauth_token="...", oauth_signature="...",
+                        oauth_signature_method="PLAINTEXT", ...
+
+PLAINTEXT Signature:
+  oauth_signature = "{consumerSecret}&{tokenSecret}"
+  Example: "abc123&xyz789"
+  (No actual signing needed!)
+
+COLLECTION ENDPOINT
+-------------------
+GET /users/{username}/collection/folders/0/releases
+  Query params:
+    - page: int (1-indexed)
+    - per_page: int (default 25, app uses 50)
+    - sort: "artist"
+    - sort_order: "asc"
+
+Response:
+  {
+    "pagination": { "pages": int, "items": int },
+    "releases": [
+      {
+        "instance_id": int,
+        "id": int,
+        "basic_information": {
+          "title": string,
+          "artists": [{ "name": string }],
+          "formats": [{ "name": "Vinyl" | "CD" | ... }],
+          "thumb": string | null,
+          "year": int,
+          "labels": [{ "name": string }]
+        }
+      },
+      ...
+    ]
+  }
+
+================================================================================
+4. STORAGE DETAILS
+================================================================================
+
+OAUTH TOKENS (Permanent)
+------------------------
+Android:   EncryptedSharedPreferences (AES256-GCM)
+           Keys in file: jukebox_secure_prefs
+           Hardware-backed on supported devices
+
+Desktop:   DataStore Preferences (Protocol Buffers)
+           File: ~/.jukebox/jukebox_prefs.preferences_pb
+           ⚠️  NOT encrypted (should use OS keyring in production)
+
+iOS:       DataStore Preferences (simplified)
+           ⚠️  Should use Keychain (currently simplified)
+
+COLLECTION CACHE (Per-User)
+---------------------------
+Key:       collection_cache_{username}
+Content:   JSON serialization of List<CollectionItem>
+Location:  Same storage as tokens
+Lifecycle: Created after first full sync, updated after each refresh
+Format:    kotlinx-serialization JSON
+Size:      ~10-50 KB per typical collection
+
+Example cache structure (minimized JSON):
+  [{"instanceId":1,"id":100,"title":"Album","artists":["Artist"],...}]
+
+================================================================================
+5. KEY COMPONENTS & PATTERNS
+================================================================================
+
+MVVM WITH STATEFLOW
+-------------------
+ViewModels expose StateFlow<UiState>
+UI collects with collectAsStateWithLifecycle()
+All mutations through _state.update { ... }
+
+Example:
+  data class CollectionUiState(
+    val items: List<CollectionItem>,
+    val isLoading: Boolean,
+    val syncProgress: Float?,    // 0f-1f during sync
+    val selectedFilter: Any?,    // Char, LetterFilter, or null
+    val randomItem: CollectionItem?,  // For overlay
+  )
+
+COROUTINES
+----------
+- viewModelScope for lifecycle-aware cancellation
+- Dispatchers.IO for disk/network operations
+- Dispatchers.Main for UI updates
+- All suspend functions are cancellable
+
+EXPECT/ACTUAL FOR CROSS-PLATFORM
+---------------------------------
+// commonMain
+expect class SecureStorage { ... }
+expect fun currentTimeMillis(): Long
+
+// androidMain, desktopMain, iosMain
+actual class SecureStorage(context: Context) { ... }
+actual fun currentTimeMillis(): Long = System.currentTimeMillis()
+
+DEPENDENCY INJECTION
+--------------------
+Platform entry points construct:
+- DiscogsService + HttpClient
+- SecureStorage
+- openUrl lambda
+↓
+Passed to App(service, storage, openUrl)
+↓
+ViewModels receive injected services
+
+================================================================================
+6. TECH STACK SUMMARY
+================================================================================
+
+HTTP:               Ktor 3.1.3 (platform-specific engines)
+Serialization:      kotlinx-serialization 1.8.1
+State Management:   ViewModel 2.10.0 + StateFlow
+UI:                 Compose Multiplatform 1.10.3
+Navigation:         androidx.navigation-compose 2.9.2
+Image Loading:      Coil 3.1.0
+Coroutines:         kotlinx-coroutines 1.10.2
+Storage:            DataStore 1.1.7 (Desktop/iOS)
+                    EncryptedSharedPreferences (Android)
+
+Testing:            Ktor MockEngine, Turbine, KoTest, JUnit 4, MockK
+
+================================================================================
+7. CURRENT STATE MACHINES
+================================================================================
+
+AUTH STATE
+----------
+Unauthenticated
+    ↓
+    connectToDiscogs() → Authenticating
+                           ↓
+                           submitVerifier(PIN)
+                           ↓
+                        Authenticated (username)
+                           ↓
+                           disconnect() → Unauthenticated
+
+                        Error (message) ↻ retry / disconnect
+
+COLLECTION SYNC STATE
+---------------------
+init {
+  Phase 1: Restore from cache → items show [cached], totalPages=1
+  Phase 2: Start syncAllPages() → syncProgress = 0f
+    ├─ Fetch page 1 → syncProgress ≈ 0.5
+    ├─ Fetch page 2 → syncProgress ≈ 1.0
+    └─ Done → syncProgress = null, items=[all], persisted to cache
+}
+
+refresh() {
+  ├─ Keep items visible (no loading state)
+  └─ Restart syncAllPages() from page 1
+}
+
+================================================================================
+FULL FILE TREE (KEY FILES)
+================================================================================
+
+composeApp/src/
+├── commonMain/kotlin/com/joergi/jukebox/
+│   ├── App.kt                              [Root composable, navigation]
+│   ├── model/
+│   │   └── CollectionItem.kt               [Data models, JSON parsing]
+│   ├── service/
+│   │   └── DiscogsService.kt               [OAuth 1.0a, API calls, 263 lines]
+│   ├── storage/
+│   │   └── SecureStorage.kt                [Expect class, keys]
+│   ├── ui/screen/
+│   │   ├── HomeScreen.kt                   [Auth UI]
+│   │   └── CollectionScreen.kt             [Collection UI, 636 lines]
+│   ├── ui/theme/
+│   │   └── JukeboxTheme.kt
+│   └── viewmodel/
+│       ├── DiscogsAuthViewModel.kt         [OAuth state machine]
+│       └── CollectionViewModel.kt          [Collection state, cache, filter]
+├── androidMain/
+│   ├── kotlin/.../MainActivity.kt          [Activity, DI setup]
+│   └── kotlin/.../storage/SecureStorage.kt [Android impl]
+├── desktopMain/
+│   ├── kotlin/.../Main.kt                  [Window, DI setup]
+│   └── kotlin/.../storage/SecureStorage.kt [Desktop impl]
+└── commonTest/
+    └── ... [Ktor mock tests, Turbine state tests]
+
+================================================================================
+END OF SUMMARY
+================================================================================

@@ -179,6 +179,97 @@ class DiscogsService(
         )
     }
 
+    /**
+     * Fetches the newest 50 records added to the collection.
+     * Sorted by date_added DESC to get most recent first.
+     * Used to detect new additions since last sync.
+     *
+     * @param username The authenticated user's username
+     * @param folderId The collection folder ID (0 = main collection)
+     * @return List of CollectionItem objects sorted by newest added
+     * @throws DiscogsException if API request fails
+     */
+    suspend fun fetchNewestFiftyRecords(
+        username: String,
+        folderId: Int = 0
+    ): List<CollectionItem> {
+        val data: DiscogsCollectionResponse = authenticatedGet(
+            path = "/users/$username/collection/folders/$folderId/releases",
+            queryParams = mapOf(
+                "sort" to "date_added",
+                "sort_order" to "desc",
+                "per_page" to "50",
+                "page" to "1",
+            ),
+        )
+        return data.releases.map { CollectionItem.fromJson(it) }
+    }
+
+    /**
+     * Fetches ALL records in the collection, handling pagination.
+     * Used during full resync when validation fails.
+     * Sorts by artist ascending to maintain collection order.
+     *
+     * @param username The authenticated user's username
+     * @param folderId The collection folder ID (0 = main collection)
+     * @param sortBy The field to sort by (default: "artist")
+     * @param sortOrder Sort direction: "asc" or "desc" (default: "asc")
+     * @return Complete list of all CollectionItem objects
+     * @throws DiscogsException if API request fails
+     */
+    suspend fun fetchAllCollectionRecords(
+        username: String,
+        folderId: Int = 0,
+        sortBy: String = "artist",
+        sortOrder: String = "asc"
+    ): List<CollectionItem> {
+        val allRecords = mutableListOf<CollectionItem>()
+        var page = 1
+        var hasMore = true
+
+        while (hasMore) {
+            val data: DiscogsCollectionResponse = authenticatedGet(
+                path = "/users/$username/collection/folders/$folderId/releases",
+                queryParams = mapOf(
+                    "sort" to sortBy,
+                    "sort_order" to sortOrder,
+                    "per_page" to "50",
+                    "page" to "$page",
+                ),
+            )
+            allRecords.addAll(data.releases.map { CollectionItem.fromJson(it) })
+
+            hasMore = page < data.pagination.pages
+            page++
+        }
+
+        return allRecords
+    }
+
+    /**
+     * Fetches metadata about the collection folder, particularly the total item count.
+     * Used to validate that sync preserved the total record count.
+     *
+     * @param username The authenticated user's username
+     * @param folderId The collection folder ID (0 = main collection)
+     * @return Map with collection metadata including count
+     * @throws DiscogsException if API request fails
+     */
+    suspend fun getCollectionMetadata(
+        username: String,
+        folderId: Int = 0
+    ): Int {
+        // We fetch a single item to get pagination metadata which includes total count
+        val data: DiscogsCollectionResponse = authenticatedGet(
+            path = "/users/$username/collection/folders/$folderId/releases",
+            queryParams = mapOf(
+                "per_page" to "1",
+                "page" to "1",
+            ),
+        )
+        return data.pagination.items
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     private suspend inline fun <reified T> authenticatedGet(

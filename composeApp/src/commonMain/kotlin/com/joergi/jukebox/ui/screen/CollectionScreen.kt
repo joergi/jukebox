@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +75,9 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.joergi.jukebox.model.CollectionItem
+import com.joergi.jukebox.model.CollectionSyncMetadata
+import com.joergi.jukebox.model.SyncState
+import com.joergi.jukebox.model.formatSyncTime
 import com.joergi.jukebox.viewmodel.CollectionUiState
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.LetterFilter
@@ -91,6 +96,14 @@ fun CollectionScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+
+    // Extract sync state from uiState
+    val syncState = uiState.syncState
+    val syncMetadata = uiState.syncMetadata
+    val newRecordsCount = uiState.newRecordsCount
+
+    // Track error state for snackbar
+    val syncError = (syncState as? SyncState.Error)?.message
 
     // Show random-pick overlay when randomItem is set
     uiState.randomItem?.let { item ->
@@ -139,6 +152,17 @@ fun CollectionScreen(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),
                     actions = {
+                        // Manual refresh button
+                        IconButton(
+                            onClick = { viewModel.performManualSync() },
+                            enabled = uiState.items.isNotEmpty() && syncState !is SyncState.FetchingNewest && syncState !is SyncState.Validating && syncState !is SyncState.FullResync,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Manual refresh",
+                            )
+                        }
+                        // Random record button
                         IconButton(
                             onClick = { viewModel.pickRandom() },
                             enabled = uiState.items.isNotEmpty(),
@@ -159,6 +183,12 @@ fun CollectionScreen(
                         trackColor = MaterialTheme.colorScheme.primaryContainer,
                     )
                 }
+                // Show sync metadata and new records badge
+                SyncMetadataBar(
+                    syncMetadata = syncMetadata,
+                    newRecordsCount = newRecordsCount,
+                    syncState = syncState,
+                )
             }
         },
         bottomBar = {
@@ -182,26 +212,96 @@ fun CollectionScreen(
             }
         },
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = uiState.isLoading && uiState.items.isEmpty(),
-            onRefresh = { viewModel.refresh() },
-            modifier = Modifier.padding(padding).fillMaxSize(),
+        Box(modifier = Modifier.fillMaxSize()) {
+            PullToRefreshBox(
+                isRefreshing = uiState.isLoading && uiState.items.isEmpty(),
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.padding(padding).fillMaxSize(),
+            ) {
+                val displayItems = uiState.filteredItems
+                when {
+                    uiState.items.isEmpty() && uiState.isLoading -> LoadingPlaceholder()
+                    uiState.items.isEmpty() && uiState.error != null -> CollectionError(
+                        message = uiState.error!!,
+                        onRetry = { viewModel.refresh() },
+                    )
+                    uiState.isEmpty -> EmptyCollection()
+                    displayItems.isEmpty() && uiState.selectedFilter != null && uiState.isLoading -> LoadingPlaceholder()
+                    displayItems.isEmpty() && uiState.selectedFilter != null -> EmptyFilterResult(uiState.selectedFilter)
+                    else -> CollectionList(
+                        uiState = uiState,
+                        displayItems = displayItems,
+                        listState = listState,
+                    )
+                }
+            }
+            // Show sync error snackbar
+            if (syncError != null) {
+                Box(modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
+                    Snackbar(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(syncError)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Sync metadata bar ─────────────────────────────────────────────────────────
+
+@Composable
+private fun SyncMetadataBar(
+    syncMetadata: CollectionSyncMetadata?,
+    newRecordsCount: Int,
+    syncState: SyncState,
+) {
+    if (syncMetadata != null || newRecordsCount > 0) {
+        Surface(
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            val displayItems = uiState.filteredItems
-            when {
-                uiState.items.isEmpty() && uiState.isLoading -> LoadingPlaceholder()
-                uiState.items.isEmpty() && uiState.error != null -> CollectionError(
-                    message = uiState.error!!,
-                    onRetry = { viewModel.refresh() },
-                )
-                uiState.isEmpty -> EmptyCollection()
-                displayItems.isEmpty() && uiState.selectedFilter != null && uiState.isLoading -> LoadingPlaceholder()
-                displayItems.isEmpty() && uiState.selectedFilter != null -> EmptyFilterResult(uiState.selectedFilter)
-                else -> CollectionList(
-                    uiState = uiState,
-                    displayItems = displayItems,
-                    listState = listState,
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Show sync timestamp
+                if (syncMetadata != null) {
+                    Text(
+                        text = "Last synced ${syncMetadata.lastSyncedAt.formatSyncTime()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                // Show new records badge
+                if (newRecordsCount > 0) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) {
+                        Text(
+                            text = "+$newRecordsCount new",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                // Show sync state indicator
+                when (syncState) {
+                    is SyncState.FetchingNewest, is SyncState.Validating, is SyncState.FullResync -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    else -> {}
+                }
             }
         }
     }
