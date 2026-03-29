@@ -181,7 +181,7 @@ class DiscogsService(
 
     /**
      * Fetches the newest 50 records added to the collection.
-     * Sorted by date_added DESC to get most recent first.
+     * Sorted by added DESC to get most recent first.
      * Used to detect new additions since last sync.
      *
      * @param username The authenticated user's username
@@ -196,7 +196,7 @@ class DiscogsService(
         val data: DiscogsCollectionResponse = authenticatedGet(
             path = "/users/$username/collection/folders/$folderId/releases",
             queryParams = mapOf(
-                "sort" to "date_added",
+                "sort" to "added",
                 "sort_order" to "desc",
                 "per_page" to "50",
                 "page" to "1",

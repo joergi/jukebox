@@ -55,7 +55,7 @@ class CollectionSyncFlowTest {
     }
 
     @Test
-    fun `newest fifty are fetched sorted by date_added DESC`() {
+    fun `newest fifty are fetched sorted by added DESC`() {
         val newestFifty = listOf(
             createItem(50, "Newest Album"),
             createItem(49, "Second Newest"),
