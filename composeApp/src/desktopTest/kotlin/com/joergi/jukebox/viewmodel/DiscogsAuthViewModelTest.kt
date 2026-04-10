@@ -1,8 +1,9 @@
 package com.joergi.jukebox.viewmodel
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import app.cash.turbine.test
-import com.joergi.jukebox.service.DiscogsException
 import com.joergi.jukebox.service.DiscogsService
 import com.joergi.jukebox.storage.SecureStorage
 import com.joergi.jukebox.storage.StorageKeys
@@ -17,48 +18,54 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
-import okio.Path.Companion.toPath
-import org.junit.Rule
-import org.junit.rules.TemporaryFolder
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 
 /**
+ * In-memory [DataStore]<[Preferences]> for tests.
+ *
+ * All reads and writes happen synchronously on the calling coroutine's
+ * context — no file I/O, no [Dispatchers.IO] involvement, no wall-clock delays.
+ */
+private class InMemoryPreferencesDataStore : DataStore<Preferences> {
+    private val _state = MutableStateFlow<Preferences>(emptyPreferences())
+    override val data: Flow<Preferences> = _state
+
+    override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+        val newValue = transform(_state.value)
+        _state.value = newValue
+        return newValue
+    }
+}
+
+/**
  * Unit tests for [DiscogsAuthViewModel].
  *
- * Uses a Ktor MockEngine for HTTP and a DataStore-backed [SecureStorage] with a
- * temp folder so storage is truly exercised without side-effects between tests.
+ * Uses a Ktor MockEngine for HTTP and an in-memory [DataStore]-backed [SecureStorage]
+ * so that all storage operations run on the test dispatcher without touching disk.
  */
 class DiscogsAuthViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
-    @get:Rule
-    val tmpFolder = TemporaryFolder()
-
     private lateinit var storage: SecureStorage
-    private val openedUrls = mutableListOf<String>()
+    private val openedUrls = Channel<String>(Channel.UNLIMITED)
 
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        openedUrls.clear()
-        storage = SecureStorage(
-            PreferenceDataStoreFactory.createWithPath(
-                scope = CoroutineScope(Dispatchers.IO),
-                produceFile = {
-                    tmpFolder.newFile("auth_prefs.preferences_pb").absolutePath.toPath()
-                },
-            ),
-        )
+        while (openedUrls.tryReceive().isSuccess) { /* drain */ }
+        storage = SecureStorage(InMemoryPreferencesDataStore())
     }
 
     @AfterTest
@@ -82,7 +89,7 @@ class DiscogsAuthViewModelTest {
         return DiscogsAuthViewModel(
             service = service,
             storage = storage,
-            openUrl = { url -> openedUrls.add(url) },
+            openUrl = { url -> openedUrls.send(url) },
         )
     }
 
@@ -119,8 +126,7 @@ class DiscogsAuthViewModelTest {
         val vm = makeViewModel(engine)
 
         vm.restoreSession()
-        // give coroutine a chance to run
-        kotlinx.coroutines.delay(100)
+        // With UnconfinedTestDispatcher + in-memory storage, the coroutine runs eagerly.
         vm.state.value.shouldBeInstanceOf<AuthState.Unauthenticated>()
     }
 
@@ -141,10 +147,9 @@ class DiscogsAuthViewModelTest {
             awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
             vm.connectToDiscogs()
             awaitItem().shouldBeInstanceOf<AuthState.Authenticating>()
+            val url = openedUrls.receive()
+            url shouldBe "https://www.discogs.com/oauth/authorize?oauth_token=req_tok"
         }
-
-        openedUrls.size shouldBe 1
-        openedUrls.first() shouldBe "https://www.discogs.com/oauth/authorize?oauth_token=req_tok"
     }
 
     @Test
@@ -176,8 +181,14 @@ class DiscogsAuthViewModelTest {
             awaitItem() // Unauthenticated
             vm.connectToDiscogs()
             awaitItem() // Authenticating
+            // Wait for connectToDiscogs to fully complete (i.e. the request token HTTP call
+            // finished and openUrl was invoked). This ensures pendingRequestToken is set in
+            // DiscogsService before submitVerifier calls completeOAuthFlow().
+            openedUrls.receive()
             vm.submitVerifier("123456")
-            awaitItem() // Authenticating again
+            // StateFlow deduplicates: submitVerifier also sets Authenticating, but since
+            // the state is already Authenticating from connectToDiscogs, that update is a
+            // no-op. Only the final Authenticated transition is emitted.
             val auth = awaitItem()
             auth.shouldBeInstanceOf<AuthState.Authenticated>().username shouldBe "the_user"
         }
@@ -223,8 +234,8 @@ class DiscogsAuthViewModelTest {
         val engine = MockEngine { _ -> respondError(HttpStatusCode.BadRequest) }
         val vm = makeViewModel(engine)
 
+        // With in-memory storage + UnconfinedTestDispatcher, restoreSession runs eagerly
         vm.restoreSession()
-        kotlinx.coroutines.delay(100)
         vm.state.value.shouldBeInstanceOf<AuthState.Authenticated>()
 
         vm.state.test {
