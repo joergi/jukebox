@@ -30,6 +30,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 /**
  * In-memory [DataStore]<[Preferences]> for tests.
@@ -147,20 +148,15 @@ class DiscogsAuthViewModelTest {
         }
         val vm = makeViewModel(engine)
 
-        vm.state.test {
-            awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+        vm.connectToDiscogs()
+        // Drain everything: the viewModelScope coroutine sets Authenticating, makes the
+        // HTTP call (Ktor MockEngine on IO thread), then calls openUrl().
+        // advanceUntilIdle() spins until both the test-scheduler queue and any
+        // continuation resumed from the IO thread are fully drained.
+        advanceUntilIdle()
 
-            vm.connectToDiscogs()
-
-            // First emission: Authenticating (set before the HTTP call)
-            awaitItem().shouldBeInstanceOf<AuthState.Authenticating>()
-
-            // After HTTP call succeeds, state stays Authenticating (waiting for PIN)
-            // No further emission expected — openedUrls should be set
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        openedUrls shouldBe listOf("https://www.discogs.com/oauth/authorize?oauth_token=req_tok")
+        vm.state.value.shouldBeInstanceOf<AuthState.Authenticating>()
+        assertEquals(listOf("https://www.discogs.com/oauth/authorize?oauth_token=req_tok"), openedUrls)
     }
 
     @Test
