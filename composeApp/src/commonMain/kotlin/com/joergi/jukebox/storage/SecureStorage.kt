@@ -61,6 +61,8 @@ object StorageKeys {
     const val ACCESS_TOKEN = "discogs_access_token"
     const val ACCESS_TOKEN_SECRET = "discogs_access_token_secret"
     const val USERNAME = "discogs_username"
+    /** Interval in minutes between random-record reminder notifications. Default: 1. */
+    const val RANDOM_NOTIFICATION_INTERVAL_MINUTES = "random_notification_interval_minutes"
     fun collectionCache(username: String) = "collection_cache_$username"
     fun collectionSyncMetadata(username: String) = "collection_sync_metadata_$username"
     fun newestFiftyIds(username: String) = "newest_fifty_ids_$username"

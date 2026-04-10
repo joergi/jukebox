@@ -3,6 +3,8 @@
 
     <!-- Required for Discogs OAuth and image loading -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required for posting notifications on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"

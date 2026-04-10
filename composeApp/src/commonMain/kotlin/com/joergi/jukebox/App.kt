@@ -12,6 +12,7 @@ import com.joergi.jukebox.service.DiscogsService
 import com.joergi.jukebox.storage.SecureStorage
 import com.joergi.jukebox.ui.screen.CollectionScreen
 import com.joergi.jukebox.ui.screen.HomeScreen
+import com.joergi.jukebox.ui.screen.SettingsScreen
 import com.joergi.jukebox.ui.theme.JukeboxTheme
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
@@ -24,6 +25,9 @@ internal data object HomeRoute
 
 @Serializable
 internal data class CollectionRoute(val username: String)
+
+@Serializable
+internal data class SettingsRoute(val username: String)
 
 /**
  * Root composable.
@@ -74,6 +78,28 @@ fun App(
                 }
 
                 CollectionScreen(
+                    viewModel = collectionViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToSettings = {
+                        navController.navigate(SettingsRoute(route.username))
+                    },
+                )
+            }
+
+            composable<SettingsRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<SettingsRoute>()
+
+                // Reuse the same CollectionViewModel instance so interval changes
+                // take effect immediately in the collection screen.
+                val collectionViewModel = remember(route.username) {
+                    CollectionViewModel(
+                        service = service,
+                        username = route.username,
+                        storage = storage,
+                    )
+                }
+
+                SettingsScreen(
                     viewModel = collectionViewModel,
                     onNavigateBack = { navController.popBackStack() },
                 )
