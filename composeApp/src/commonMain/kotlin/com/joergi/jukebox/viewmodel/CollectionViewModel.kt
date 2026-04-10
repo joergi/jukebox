@@ -40,8 +40,13 @@ data class CollectionUiState(
     val totalItems: Int = 0,
     /** null = show all, Char = show that letter, LetterFilter = show # or ? group */
     val selectedFilter: Any? = null,
-    /** Non-null while the random-pick overlay is showing. */
-    val randomItem: CollectionItem? = null,
+    /** Non-null while a randomly picked item should be highlighted in the list. */
+    val highlightedItem: CollectionItem? = null,
+    /**
+     * Index into [filteredItems] to scroll to after a random pick.
+     * Consumed (set to null) by the UI after scrolling.
+     */
+    val scrollToIndex: Int? = null,
     /**
      * 0f..1f progress of the background full-collection fetch.
      * null = not fetching (either done or not started yet).
@@ -51,6 +56,10 @@ data class CollectionUiState(
     val syncState: SyncState = SyncState.Idle,
     val syncMetadata: CollectionSyncMetadata? = null,
     val newRecordsCount: Int = 0,
+    /** Current random-reminder interval in minutes. Default 1. */
+    val notificationIntervalMinutes: Long = DEFAULT_NOTIFICATION_INTERVAL_MINUTES,
+    /** Seconds remaining until the next random pick. Null when no reminder is scheduled. */
+    val reminderCountdownSeconds: Long? = null,
 ) {
     val hasMore: Boolean get() = currentPage < totalPages
     val isEmpty: Boolean get() = items.isEmpty() && !isLoading && error == null
@@ -72,6 +81,10 @@ data class CollectionUiState(
                 }
             }
         }
+
+    companion object {
+        const val DEFAULT_NOTIFICATION_INTERVAL_MINUTES = 1L
+    }
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
@@ -118,6 +131,7 @@ class CollectionViewModel(
 
     // Synchronization state
     private var syncTimer: Job? = null
+    private var reminderJob: Job? = null
     private companion object {
         private const val SYNC_INTERVAL_MS = 3 * 60 * 60 * 1000L  // 3 hours
     }
@@ -126,6 +140,7 @@ class CollectionViewModel(
         viewModelScope.launch {
             restoreFromCache()
             syncAllPages()
+            loadAndApplyNotificationInterval()
         }
     }
 
@@ -133,6 +148,9 @@ class CollectionViewModel(
         super.onCleared()
         syncTimer?.cancel()
         syncTimer = null
+        reminderJob?.cancel()
+        reminderJob = null
+        NotificationService.cancelRandomReminder()
     }
 
     // ── Cache ─────────────────────────────────────────────────────────────────
@@ -512,16 +530,113 @@ class CollectionViewModel(
         _uiState.update { it.copy(selectedFilter = filter) }
     }
 
-    /** Picks a random record from all loaded items and shows the overlay. */
+    /**
+     * If no item is highlighted yet, picks a random record and highlights it.
+     * If an item is already highlighted, scrolls back to it without changing the selection.
+     * Clears any active letter filter so the item is visible.
+     */
     fun pickRandom() {
-        val items = _uiState.value.items
+        val state = _uiState.value
+        val items = state.items
         if (items.isEmpty()) return
-        _uiState.update { it.copy(randomItem = items.random()) }
+        val existing = state.highlightedItem
+        if (existing != null) {
+            // Scroll back to the already-selected item
+            val index = items.indexOf(existing)
+            _uiState.update {
+                it.copy(
+                    selectedFilter = null,
+                    scrollToIndex = if (index >= 0) index else null,
+                )
+            }
+        } else {
+            val picked = items.random()
+            val index = items.indexOf(picked)
+            _uiState.update {
+                it.copy(
+                    selectedFilter = null,
+                    highlightedItem = picked,
+                    scrollToIndex = if (index >= 0) index else null,
+                )
+            }
+        }
     }
 
-    /** Dismisses the random-pick overlay. */
-    fun dismissRandom() {
-        _uiState.update { it.copy(randomItem = null) }
+    /** Called by the UI after it has consumed the scroll-to event. */
+    fun onScrollToIndexConsumed() {
+        _uiState.update { it.copy(scrollToIndex = null) }
+    }
+
+    /** Clears the random highlight. */
+    fun clearHighlight() {
+        _uiState.update { it.copy(highlightedItem = null, scrollToIndex = null) }
+    }
+
+    // ── Notification interval ─────────────────────────────────────────────────
+
+    /**
+     * Reads the saved notification interval from storage and starts the reminder.
+     * Falls back to [CollectionUiState.DEFAULT_NOTIFICATION_INTERVAL_MINUTES] if not set.
+     */
+    private suspend fun loadAndApplyNotificationInterval() {
+        val saved = storage?.read(StorageKeys.RANDOM_NOTIFICATION_INTERVAL_MINUTES)
+            ?.toLongOrNull()
+            ?: CollectionUiState.DEFAULT_NOTIFICATION_INTERVAL_MINUTES
+        _uiState.update { it.copy(notificationIntervalMinutes = saved) }
+        // Only schedule the in-process reminder when backed by real storage.
+        // Without storage (e.g. in tests) the infinite delay loop would hang.
+        if (storage != null) scheduleReminder(saved)
+    }
+
+    /**
+     * Persists the new interval and reschedules the reminder.
+     * Safe to call from any coroutine context.
+     */
+    fun setNotificationIntervalMinutes(minutes: Long) {
+        viewModelScope.launch {
+            storage?.write(StorageKeys.RANDOM_NOTIFICATION_INTERVAL_MINUTES, minutes.toString())
+            _uiState.update { it.copy(notificationIntervalMinutes = minutes) }
+            if (storage != null) scheduleReminder(minutes)
+        }
+    }
+
+    private fun scheduleReminder(intervalMinutes: Long) {
+        reminderJob?.cancel()
+        reminderJob = viewModelScope.launch {
+            val intervalSeconds = intervalMinutes * 60L
+            while (true) {
+                // Tick countdown every second
+                var remaining = intervalSeconds
+                while (remaining > 0) {
+                    _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
+                    delay(1_000L)
+                    remaining--
+                }
+                _uiState.update { it.copy(reminderCountdownSeconds = 0) }
+                forcePickRandom()
+                // Fire notification with the newly picked item
+                val picked = _uiState.value.highlightedItem
+                if (picked != null) {
+                    val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                    NotificationService.showRandomRecordNotification(artist, picked.title)
+                }
+            }
+        }
+    }
+
+    /** Always picks a new random record, replacing any existing highlight. */
+    private fun forcePickRandom() {
+        val items = _uiState.value.items
+        if (items.isEmpty()) return
+        val picked = items.random()
+        val index = items.indexOf(picked)
+        _uiState.update {
+            it.copy(
+                selectedFilter = null,
+                highlightedItem = picked,
+                scrollToIndex = if (index >= 0) index else null,
+            )
+        }
     }
 
     // loadNextPage kept for backward-compat (infinite scroll trigger still calls it)

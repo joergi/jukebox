@@ -1,8 +1,10 @@
 package com.joergi.jukebox
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.ComposeUIViewController
 import com.joergi.jukebox.service.DiscogsService
+import com.joergi.jukebox.service.NotificationService
 import com.joergi.jukebox.storage.SecureStorage
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
@@ -26,6 +28,11 @@ import platform.UIKit.UIApplication
  * phase to inject them if needed, or hardcode placeholders for development.
  */
 fun MainViewController() = ComposeUIViewController {
+
+    // Request notification permission on first launch (best-effort, no-op if already granted)
+    LaunchedEffect(Unit) {
+        NotificationService.requestAuthorization()
+    }
 
     val httpClient = remember {
         HttpClient(Darwin) {

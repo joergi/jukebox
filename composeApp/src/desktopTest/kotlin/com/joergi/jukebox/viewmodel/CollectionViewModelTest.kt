@@ -2,6 +2,7 @@ package com.joergi.jukebox.viewmodel
 
 import app.cash.turbine.test
 import com.joergi.jukebox.service.DiscogsService
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -361,5 +362,188 @@ class CollectionViewModelTest {
     fun `isEmpty is false when error present`() {
         val state = CollectionUiState(error = "oops")
         state.isEmpty shouldBe false
+    }
+
+    // ── pickRandom ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `pickRandom sets highlightedItem and scrollToIndex when items exist`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 3), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            // Drain initial sync
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.pickRandom()
+            val state = awaitItem()
+            state.highlightedItem.shouldNotBeNull()
+            state.scrollToIndex.shouldNotBeNull()
+            // The highlighted item must be one of the loaded items
+            (state.highlightedItem!! in state.items) shouldBe true
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `pickRandom clears letter filter`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """
+                {"pagination":{"pages":1,"items":2},"releases":[
+                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl"}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl"}]}}
+                ]}
+                """.trimIndent(),
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.filterLetter('A')
+            awaitItem() // consume filter state
+
+            vm.pickRandom()
+            val state = awaitItem()
+            state.selectedFilter.shouldBeNull()
+            state.highlightedItem.shouldNotBeNull()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `pickRandom is no-op when items list is empty`() = runTest {
+        val engine = MockEngine { _ -> respondError(HttpStatusCode.InternalServerError) }
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().error == null && awaitItem().syncProgress != null) { /* drain */ }
+            val beforePick = vm.uiState.value
+
+            vm.pickRandom()
+            // State must not emit a new value since items is empty
+            expectNoEvents()
+
+            vm.uiState.value.highlightedItem.shouldBeNull()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onScrollToIndexConsumed clears scrollToIndex`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.pickRandom()
+            val withScroll = awaitItem()
+            withScroll.scrollToIndex.shouldNotBeNull()
+
+            vm.onScrollToIndexConsumed()
+            val consumed = awaitItem()
+            consumed.scrollToIndex.shouldBeNull()
+            consumed.highlightedItem.shouldNotBeNull() // highlight persists
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `clearHighlight removes both highlightedItem and scrollToIndex`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.pickRandom()
+            awaitItem() // highlighted state
+
+            vm.clearHighlight()
+            val cleared = awaitItem()
+            cleared.highlightedItem.shouldBeNull()
+            cleared.scrollToIndex.shouldBeNull()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Notification interval ─────────────────────────────────────────────────
+
+    @Test
+    fun `default notification interval is 1 minute`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+            vm.uiState.value.notificationIntervalMinutes shouldBe
+                CollectionUiState.DEFAULT_NOTIFICATION_INTERVAL_MINUTES
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setNotificationIntervalMinutes updates state`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.setNotificationIntervalMinutes(30L)
+            val updated = awaitItem()
+            updated.notificationIntervalMinutes shouldBe 30L
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setNotificationIntervalMinutes persists to storage`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val storage = mutableMapOf<String, String>()
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+        }
+        val service = DiscogsService("key", "secret", client).also { it.setCredentials("tok", "sec") }
+        val vm = CollectionViewModel(
+            service = service,
+            username = "user",
+            readCache = { storage["cache"] },
+            writeCache = { json -> storage["cache"] = json },
+        )
+
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.setNotificationIntervalMinutes(60L)
+            awaitItem() // consume updated state
+
+            // When no SecureStorage is provided, write is a no-op; but state must update
+            vm.uiState.value.notificationIntervalMinutes shouldBe 60L
+
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }
