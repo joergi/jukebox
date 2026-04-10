@@ -16,6 +16,9 @@ jobs:
   # ── 1. Path filter — skip everything if no relevant files changed ──────────
   check-if-android-should-run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       should_run: ${{ steps.watched_paths.outputs.src }}
     steps:

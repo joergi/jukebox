@@ -10,6 +10,9 @@ jobs:
   # ── 1. Path filter ──────────────────────────────────────────────────────────
   check-if-windows-should-run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       should_run: ${{ steps.watched_paths.outputs.src }}
     steps:
