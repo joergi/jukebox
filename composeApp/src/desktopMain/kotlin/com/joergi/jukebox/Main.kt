@@ -20,6 +20,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okio.Path.Companion.toPath
 import java.awt.Desktop
+import java.awt.Dimension
+import java.awt.Image
+import java.awt.SystemTray
+import java.awt.Toolkit
+import java.awt.TrayIcon
+import java.awt.image.BufferedImage
 import java.io.File
 import java.net.URI
 import java.util.Properties
@@ -78,6 +84,25 @@ fun main() = application {
         }
     }
 
+    // ── System tray icon (required for displayMessage notifications) ──────────
+    if (SystemTray.isSupported()) {
+        val tray = SystemTray.getSystemTray()
+        if (tray.trayIcons.isEmpty()) {
+            val iconSize: Dimension = tray.trayIconSize
+            val img: Image = try {
+                val url = object {}.javaClass.getResource("/jukebox_tray.png")
+                if (url != null) Toolkit.getDefaultToolkit().getImage(url)
+                    .getScaledInstance(iconSize.width, iconSize.height, Image.SCALE_SMOOTH)
+                else createFallbackTrayImage(iconSize)
+            } catch (_: Exception) {
+                createFallbackTrayImage(iconSize)
+            }
+            val trayIcon = TrayIcon(img, "Jukebox")
+            trayIcon.isImageAutoSize = true
+            try { tray.add(trayIcon) } catch (_: Exception) { /* ignore if tray unavailable */ }
+        }
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "Jukebox",
@@ -90,3 +115,18 @@ fun main() = application {
         )
     }
 }
+
+/** Creates a minimal solid-colour image as a tray icon fallback. */
+private fun createFallbackTrayImage(size: Dimension): Image {
+    val w = size.width.coerceAtLeast(16)
+    val h = size.height.coerceAtLeast(16)
+    val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+    val g = img.createGraphics()
+    g.color = java.awt.Color(30, 30, 30)
+    g.fillOval(0, 0, w, h)
+    g.color = java.awt.Color(200, 200, 200)
+    g.fillOval(w / 4, h / 4, w / 2, h / 2)
+    g.dispose()
+    return img
+}
+
