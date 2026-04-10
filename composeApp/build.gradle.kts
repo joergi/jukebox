@@ -91,6 +91,7 @@ kotlin {
                 implementation(libs.ktor.client.okhttp)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.security.crypto)
+                implementation(libs.androidx.work.runtime)
             }
         }
 

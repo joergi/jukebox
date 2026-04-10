@@ -1,6 +1,9 @@
 package com.joergi.jukebox.ui.screen
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,9 +31,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Casino
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -93,6 +96,7 @@ import com.joergi.jukebox.viewmodel.LetterFilter
 fun CollectionScreen(
     viewModel: CollectionViewModel,
     onNavigateBack: () -> Unit,
+    onNavigateToSettings: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -105,10 +109,13 @@ fun CollectionScreen(
     // Track error state for snackbar
     val syncError = (syncState as? SyncState.Error)?.message
 
-    // Show random-pick overlay when randomItem is set
-    uiState.randomItem?.let { item ->
-        RandomRecordOverlay(item = item, onDismiss = { viewModel.dismissRandom() })
-        return
+    // Scroll to the highlighted item when scrollToIndex changes
+    val scrollToIndex = uiState.scrollToIndex
+    LaunchedEffect(scrollToIndex) {
+        if (scrollToIndex != null) {
+            listState.animateScrollToItem(scrollToIndex)
+            viewModel.onScrollToIndexConsumed()
+        }
     }
 
     // Trigger next-page load when the user scrolls near the bottom
@@ -152,6 +159,13 @@ fun CollectionScreen(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),
                     actions = {
+                        // Settings button
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                            )
+                        }
                         // Manual refresh button
                         IconButton(
                             onClick = { viewModel.performManualSync() },
@@ -162,7 +176,7 @@ fun CollectionScreen(
                                 contentDescription = "Manual refresh",
                             )
                         }
-                        // Random record button
+                        // Random record button — picks a record or scrolls back to the current one
                         IconButton(
                             onClick = { viewModel.pickRandom() },
                             enabled = uiState.items.isNotEmpty(),
@@ -192,10 +206,25 @@ fun CollectionScreen(
             }
         },
         bottomBar = {
-            AlphabetBar(
-                selectedFilter = uiState.selectedFilter,
-                onFilterSelected = { viewModel.filterLetter(it) },
-            )
+            Column {
+                val countdown = uiState.reminderCountdownSeconds
+                if (countdown != null) {
+                    Surface(tonalElevation = 2.dp) {
+                        Text(
+                            text = formatCountdown(countdown),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+                AlphabetBar(
+                    selectedFilter = uiState.selectedFilter,
+                    onFilterSelected = { viewModel.filterLetter(it) },
+                )
+            }
         },
         // Capture keyboard events for letter filtering at the Scaffold level
         modifier = Modifier.onKeyEvent { event ->
@@ -232,6 +261,8 @@ fun CollectionScreen(
                         uiState = uiState,
                         displayItems = displayItems,
                         listState = listState,
+                        highlightedItem = uiState.highlightedItem,
+
                     )
                 }
             }
@@ -413,6 +444,7 @@ private fun CollectionList(
     uiState: CollectionUiState,
     displayItems: List<CollectionItem>,
     listState: androidx.compose.foundation.lazy.LazyListState,
+    highlightedItem: CollectionItem?,
 ) {
     LazyColumn(
         state = listState,
@@ -423,7 +455,11 @@ private fun CollectionList(
             items = displayItems,
             key = { _, item -> item.instanceId },
         ) { index, item ->
-            CollectionItemRow(item = item)
+            val isHighlighted = highlightedItem?.instanceId == item.instanceId
+            CollectionItemRow(
+                item = item,
+                isHighlighted = isHighlighted,
+            )
             if (index < displayItems.lastIndex) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
@@ -456,10 +492,35 @@ private fun CollectionList(
 // ── Single row ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CollectionItemRow(item: CollectionItem) {
+private fun CollectionItemRow(
+    item: CollectionItem,
+    isHighlighted: Boolean = false,
+) {
+    // Animate the highlight border colour: primary → transparent over 3 s
+    val highlightColor by animateColorAsState(
+        targetValue = if (isHighlighted)
+            MaterialTheme.colorScheme.primary
+        else
+            Color.Transparent,
+        animationSpec = tween(durationMillis = if (isHighlighted) 0 else 3000),
+        label = "highlight",
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isHighlighted)
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    )
+                else Modifier
+            )
+            .border(
+                width = 2.dp,
+                color = highlightColor,
+                shape = RoundedCornerShape(4.dp),
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -552,128 +613,6 @@ private fun Thumbnail(thumbUrl: String?) {
     }
 }
 
-// ── Random record overlay ─────────────────────────────────────────────────────
-
-@Composable
-private fun RandomRecordOverlay(item: CollectionItem, onDismiss: () -> Unit) {
-    val context = LocalPlatformContext.current
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .windowInsetsPadding(WindowInsets.navigationBars),
-    ) {
-        // Cover image fills the screen
-        if (item.thumb != null) {
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(item.thumb)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                when (painter.state.collectAsState().value) {
-                    is AsyncImagePainter.State.Loading -> {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color.White)
-                        }
-                    }
-                    is AsyncImagePainter.State.Error, is AsyncImagePainter.State.Empty -> {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(120.dp),
-                            )
-                        }
-                    }
-                    else -> SubcomposeAsyncImageContent()
-                }
-            }
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.3f),
-                    modifier = Modifier.size(120.dp),
-                )
-            }
-        }
-
-        // Scrim + metadata at the bottom
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.65f))
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                if (item.artists.isNotEmpty()) {
-                    Text(
-                        text = item.artists.joinToString(", "),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White.copy(alpha = 0.9f),
-                    textAlign = TextAlign.Center,
-                )
-                if (item.formats.isNotEmpty() || item.year != null) {
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (item.formats.isNotEmpty()) {
-                            Text(
-                                text = item.formats.joinToString(", "),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                            )
-                        }
-                        if (item.formats.isNotEmpty() && item.year != null) {
-                            Text(
-                                text = "  ·  ",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.5f),
-                            )
-                        }
-                        if (item.year != null) {
-                            Text(
-                                text = "${item.year}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.7f),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                TextButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = null,
-                        tint = Color.White,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("Close", color = Color.White)
-                }
-            }
-        }
-    }
-}
-
 // ── Empty / Error / Loading states ────────────────────────────────────────────
 
 @Composable
@@ -733,4 +672,20 @@ private fun CollectionError(message: String, onRetry: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         androidx.compose.material3.Button(onClick = onRetry) { Text("Retry") }
     }
+}
+
+private fun formatCountdown(seconds: Long): String = when {
+    seconds >= 3600 -> {
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        if (m > 0) "${h}h ${m}min until next random record"
+        else "${h}h until next random record"
+    }
+    seconds >= 60 -> {
+        val m = seconds / 60
+        val s = seconds % 60
+        if (s > 0) "${m}min ${s}s until next random record"
+        else "${m}min until next random record"
+    }
+    else -> "${seconds}s until next random record"
 }
