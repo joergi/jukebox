@@ -53,16 +53,16 @@ jobs:
           echo "discogs.consumerKey=ci_dummy_key" >> local.properties
           echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
 
-      # jvmTest covers all commonTest sources compiled for JVM
+      # desktopTest covers all commonTest sources compiled for the desktop JVM target
       - name: Run JVM unit tests
-        run: ./gradlew :composeApp:jvmTest --no-daemon
+        run: ./gradlew :composeApp:desktopTest --no-daemon
 
       - name: Upload unit test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-unit-test-results
-          path: composeApp/build/reports/tests/jvmTest/
+          path: composeApp/build/reports/tests/desktopTest/
 
   # ── 3. Desktop UI tests — needs a virtual display (xvfb) ──────────────────
   ui-tests-linux:

@@ -145,7 +145,7 @@ class CollectionSyncTest {
     // ── Sorting and merging ───────────────────────────────────────────────────
 
     @Test
-    fun `newest records appear first when merged (most recently added first)`() {
+    fun `newest records appear first when merged - most recently added first`() {
         val oldCollection = listOf(
             createItem(4, "Album D"),
             createItem(3, "Album C"),

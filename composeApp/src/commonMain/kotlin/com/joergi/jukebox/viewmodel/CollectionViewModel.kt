@@ -125,8 +125,7 @@ class CollectionViewModel(
     init {
         viewModelScope.launch {
             restoreFromCache()
-            // Start incremental sync
-            performIncrementalSync()
+            syncAllPages()
         }
     }
 
@@ -238,7 +237,7 @@ class CollectionViewModel(
 
         try {
             // Phase 1: Load cached collection
-            _uiState.update { it.copy(syncState = SyncState.LoadingCache) }
+            _uiState.update { it.copy(syncState = SyncState.LoadingCache, syncProgress = 0f) }
             loadCachedCollection()
 
             val oldCount = _uiState.value.items.size
@@ -251,14 +250,14 @@ class CollectionViewModel(
             _uiState.update { it.copy(syncState = SyncState.Validating) }
             mergeAndValidate(oldCount)
 
-            _uiState.update { it.copy(syncState = SyncState.Complete) }
+            _uiState.update { it.copy(syncState = SyncState.Complete, syncProgress = null) }
 
             // Schedule next sync in 3 hours
             scheduleNextSync()
 
         } catch (e: Exception) {
             log("CollectionSync", "Sync failed: ${e.message}", e)
-            _uiState.update { it.copy(syncState = SyncState.Error("Sync failed: ${e.message}", e)) }
+            _uiState.update { it.copy(syncState = SyncState.Error("Sync failed: ${e.message}", e), syncProgress = null) }
         }
     }
 

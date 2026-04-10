@@ -53,15 +53,15 @@ jobs:
           echo "discogs.consumerKey=ci_dummy_key" >> local.properties
           echo "discogs.consumerSecret=ci_dummy_secret" >> local.properties
 
-      - name: Run JVM unit tests
-        run: ./gradlew :composeApp:jvmTest --no-daemon
+      - name: Run Desktop unit tests
+        run: ./gradlew :composeApp:desktopTest --no-daemon
 
       - name: Upload unit test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-unit-test-results
-          path: composeApp/build/reports/tests/jvmTest/
+          path: composeApp/build/reports/tests/desktopTest/
 
   # ── 3. Kotlin/Native unit tests for iOS target (no simulator boot) ─────────
   unit-tests-ios-native:

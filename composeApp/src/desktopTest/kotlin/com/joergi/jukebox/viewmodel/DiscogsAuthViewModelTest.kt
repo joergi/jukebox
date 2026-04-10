@@ -19,11 +19,15 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
 import okio.Path.Companion.toPath
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
+import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 
@@ -35,6 +39,8 @@ import kotlin.test.Test
  */
 class DiscogsAuthViewModelTest {
 
+    private val testDispatcher = UnconfinedTestDispatcher()
+
     @get:Rule
     val tmpFolder = TemporaryFolder()
 
@@ -43,6 +49,7 @@ class DiscogsAuthViewModelTest {
 
     @BeforeTest
     fun setUp() {
+        Dispatchers.setMain(testDispatcher)
         openedUrls.clear()
         storage = SecureStorage(
             PreferenceDataStoreFactory.createWithPath(
@@ -52,6 +59,11 @@ class DiscogsAuthViewModelTest {
                 },
             ),
         )
+    }
+
+    @AfterTest
+    fun tearDown() {
+        Dispatchers.resetMain()
     }
 
     private fun formHeaders() = headersOf(
