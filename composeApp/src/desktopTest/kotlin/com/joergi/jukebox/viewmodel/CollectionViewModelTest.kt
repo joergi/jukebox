@@ -182,14 +182,26 @@ class CollectionViewModelTest {
 
             vm.refresh()
 
-            // Drain second sync — collect until done
-            val states = mutableListOf(awaitItem())
-            while (states.last().syncProgress != null) {
-                states.add(awaitItem())
+            // refresh() immediately emits a reset state (syncProgress=null) to keep
+            // the old items visible during the reload.  Then syncAllPages() sets
+            // syncProgress=0f and proceeds.  We must skip the reset state and then
+            // drain until the second sync finishes (syncProgress goes null again).
+            //
+            // Collect states until we see syncProgress become non-null (sync started)
+            // and then null again (sync finished).
+            var seenProgress = false
+            var finalState = awaitItem()   // first item after refresh() — the reset state
+            while (true) {
+                if (finalState.syncProgress != null) {
+                    seenProgress = true
+                } else if (seenProgress) {
+                    // sync was in-progress and has now completed
+                    break
+                }
+                finalState = awaitItem()
             }
-            val final = states.last()
-            final.items shouldHaveSize 2
-            final.syncProgress.shouldBeNull()
+            finalState.items shouldHaveSize 2
+            finalState.syncProgress.shouldBeNull()
 
             // Cancel to avoid unconsumed-events error if refresh states coalesce
             cancelAndIgnoreRemainingEvents()
