@@ -19,10 +19,10 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -51,20 +51,22 @@ private class InMemoryPreferencesDataStore : DataStore<Preferences> {
 /**
  * Unit tests for [DiscogsAuthViewModel].
  *
- * Uses a Ktor MockEngine for HTTP and an in-memory [DataStore]-backed [SecureStorage]
- * so that all storage operations run on the test dispatcher without touching disk.
+ * Uses Turbine to observe [StateFlow] emissions.  Ktor's MockEngine may dispatch
+ * responses on a real background thread; Turbine's awaitItem() handles that via
+ * a wall-clock timeout rather than virtual time, avoiding the flakiness we saw
+ * when using advanceUntilIdle() alone.
  */
 class DiscogsAuthViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
     private lateinit var storage: SecureStorage
-    private val openedUrls = Channel<String>(Channel.UNLIMITED)
+    private val openedUrls = mutableListOf<String>()
 
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        while (openedUrls.tryReceive().isSuccess) { /* drain */ }
+        openedUrls.clear()
         storage = SecureStorage(InMemoryPreferencesDataStore())
     }
 
@@ -89,7 +91,7 @@ class DiscogsAuthViewModelTest {
         return DiscogsAuthViewModel(
             service = service,
             storage = storage,
-            openUrl = { url -> openedUrls.send(url) },
+            openUrl = { url -> openedUrls.add(url) },
         )
     }
 
@@ -117,6 +119,7 @@ class DiscogsAuthViewModelTest {
             awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
             vm.restoreSession()
             awaitItem().shouldBeInstanceOf<AuthState.Authenticated>().username shouldBe "saved_user"
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -126,7 +129,8 @@ class DiscogsAuthViewModelTest {
         val vm = makeViewModel(engine)
 
         vm.restoreSession()
-        // With UnconfinedTestDispatcher + in-memory storage, the coroutine runs eagerly.
+
+        // No state change expected — stays Unauthenticated
         vm.state.value.shouldBeInstanceOf<AuthState.Unauthenticated>()
     }
 
@@ -145,11 +149,18 @@ class DiscogsAuthViewModelTest {
 
         vm.state.test {
             awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
             vm.connectToDiscogs()
+
+            // First emission: Authenticating (set before the HTTP call)
             awaitItem().shouldBeInstanceOf<AuthState.Authenticating>()
-            val url = openedUrls.receive()
-            url shouldBe "https://www.discogs.com/oauth/authorize?oauth_token=req_tok"
+
+            // After HTTP call succeeds, state stays Authenticating (waiting for PIN)
+            // No further emission expected — openedUrls should be set
+            cancelAndIgnoreRemainingEvents()
         }
+
+        openedUrls shouldBe listOf("https://www.discogs.com/oauth/authorize?oauth_token=req_tok")
     }
 
     @Test
@@ -178,22 +189,30 @@ class DiscogsAuthViewModelTest {
         val vm = makeViewModel(engine)
 
         vm.state.test {
-            awaitItem() // Unauthenticated
+            awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
             vm.connectToDiscogs()
-            awaitItem() // Authenticating
-            // Wait for connectToDiscogs to fully complete (i.e. the request token HTTP call
-            // finished and openUrl was invoked). This ensures pendingRequestToken is set in
-            // DiscogsService before submitVerifier calls completeOAuthFlow().
-            openedUrls.receive()
+            // Authenticating emitted before HTTP call
+            awaitItem().shouldBeInstanceOf<AuthState.Authenticating>()
+
+            // Wait until connectToDiscogs fully completes (openUrl is called after
+            // startOAuthFlow() sets pendingRequestToken).  advanceUntilIdle() drains
+            // all test-scheduler tasks; the Ktor IO thread will finish and resume into
+            // the test dispatcher, which then calls openUrl before yielding again.
+            advanceUntilIdle()
+
             vm.submitVerifier("123456")
-            // StateFlow deduplicates: submitVerifier also sets Authenticating, but since
-            // the state is already Authenticating from connectToDiscogs, that update is a
-            // no-op. Only the final Authenticated transition is emitted.
-            val auth = awaitItem()
-            auth.shouldBeInstanceOf<AuthState.Authenticated>().username shouldBe "the_user"
+            // submitVerifier sets Authenticating again, but StateFlow deduplicates identical
+            // values — so we may or may not see it. Drain to final state.
+            val states = mutableListOf(awaitItem())
+            while (states.last() !is AuthState.Authenticated && states.last() !is AuthState.Error) {
+                states.add(awaitItem())
+            }
+            states.last().shouldBeInstanceOf<AuthState.Authenticated>().username shouldBe "the_user"
+
+            cancelAndIgnoreRemainingEvents()
         }
 
-        // Tokens should now be persisted
         storage.read(StorageKeys.ACCESS_TOKEN) shouldBe "acc_tok"
         storage.read(StorageKeys.USERNAME) shouldBe "the_user"
     }
@@ -204,9 +223,12 @@ class DiscogsAuthViewModelTest {
         val vm = makeViewModel(engine)
 
         vm.state.test {
-            awaitItem() // Unauthenticated
+            awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
             vm.submitVerifier("   ")
+
             awaitItem().shouldBeInstanceOf<AuthState.Error>()
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -216,10 +238,18 @@ class DiscogsAuthViewModelTest {
         val vm = makeViewModel(engine)
 
         vm.state.test {
-            awaitItem() // Unauthenticated
+            awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
             vm.connectToDiscogs()
-            awaitItem() // Authenticating
-            awaitItem().shouldBeInstanceOf<AuthState.Error>()
+
+            // Authenticating emitted first, then Error after HTTP failure
+            val states = mutableListOf(awaitItem())
+            while (states.last() !is AuthState.Error && states.last() !is AuthState.Authenticated) {
+                states.add(awaitItem())
+            }
+            states.last().shouldBeInstanceOf<AuthState.Error>()
+
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -234,14 +264,16 @@ class DiscogsAuthViewModelTest {
         val engine = MockEngine { _ -> respondError(HttpStatusCode.BadRequest) }
         val vm = makeViewModel(engine)
 
-        // With in-memory storage + UnconfinedTestDispatcher, restoreSession runs eagerly
-        vm.restoreSession()
-        vm.state.value.shouldBeInstanceOf<AuthState.Authenticated>()
-
         vm.state.test {
-            awaitItem() // Authenticated
+            awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
+            vm.restoreSession()
+            awaitItem().shouldBeInstanceOf<AuthState.Authenticated>()
+
             vm.disconnect()
             awaitItem().shouldBeInstanceOf<AuthState.Unauthenticated>()
+
+            cancelAndIgnoreRemainingEvents()
         }
 
         storage.read(StorageKeys.ACCESS_TOKEN) shouldBe null
