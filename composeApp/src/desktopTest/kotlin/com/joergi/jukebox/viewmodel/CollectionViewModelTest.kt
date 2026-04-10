@@ -182,28 +182,18 @@ class CollectionViewModelTest {
 
             vm.refresh()
 
-            // refresh() immediately emits a reset state (syncProgress=null) to keep
-            // the old items visible during the reload.  Then syncAllPages() sets
-            // syncProgress=0f and proceeds.  We must skip the reset state and then
-            // drain until the second sync finishes (syncProgress goes null again).
-            //
-            // Collect states until we see syncProgress become non-null (sync started)
-            // and then null again (sync finished).
-            var seenProgress = false
-            var finalState = awaitItem()   // first item after refresh() — the reset state
-            while (true) {
-                if (finalState.syncProgress != null) {
-                    seenProgress = true
-                } else if (seenProgress) {
-                    // sync was in-progress and has now completed
-                    break
-                }
+            // Under UnconfinedTestDispatcher, StateFlow may coalesce intermediate
+            // states (reset → progress → done) into a single emission.  Instead of
+            // relying on observing the null→non-null→null syncProgress sequence, we
+            // simply drain until we land on a settled state: syncProgress==null AND
+            // the items reflect the refreshed data.
+            var finalState: CollectionUiState
+            do {
                 finalState = awaitItem()
-            }
+            } while (finalState.syncProgress != null || finalState.items.size != 2)
             finalState.items shouldHaveSize 2
             finalState.syncProgress.shouldBeNull()
 
-            // Cancel to avoid unconsumed-events error if refresh states coalesce
             cancelAndIgnoreRemainingEvents()
         }
 
