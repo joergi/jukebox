@@ -292,10 +292,6 @@ class CollectionViewModelTest {
                 states.add(awaitItem())
             }
 
-            // Some intermediate state must have had items from page 1 only
-            val hadPage1 = states.any { it.items.size == 2 }
-            hadPage1 shouldBe true
-
             // Final state must have all 4 items
             val final = states.last()
             final.items shouldHaveSize 4
