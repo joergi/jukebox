@@ -19,6 +19,7 @@ import com.joergi.jukebox.ui.screen.SettingsScreen
 import com.joergi.jukebox.ui.theme.JukeboxTheme
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
+import com.joergi.jukebox.viewmodel.AuthState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 
@@ -75,6 +76,20 @@ fun App(
 
         // Restore any previously saved session on first composition
         LaunchedEffect(Unit) { authViewModel.restoreSession() }
+
+        // Watch auth state to determine navigation
+        val authState by authViewModel.state.collectAsState()
+
+        // If opened from notification and user is authenticated, navigate directly to collection
+        LaunchedEffect(isFromNotification, authState) {
+            if (isFromNotification && authState is AuthState.Authenticated) {
+                val username = (authState as AuthState.Authenticated).username
+                if (!notificationArtist.isNullOrEmpty() && !notificationTitle.isNullOrEmpty()) {
+                    // Navigate to collection with the notification data
+                    navController.navigate(CollectionRoute(username))
+                }
+            }
+        }
 
         NavHost(navController = navController, startDestination = HomeRoute) {
             composable<HomeRoute> {
