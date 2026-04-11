@@ -87,7 +87,7 @@ data class CollectionUiState(
         }
 
     companion object {
-        const val DEFAULT_NOTIFICATION_INTERVAL_MINUTES = 1L
+        const val DEFAULT_NOTIFICATION_INTERVAL_MINUTES = 15L
     }
 }
 
