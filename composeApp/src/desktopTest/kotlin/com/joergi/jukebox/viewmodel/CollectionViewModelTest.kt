@@ -1,7 +1,9 @@
 package com.joergi.jukebox.viewmodel
 
 import app.cash.turbine.test
+import com.joergi.jukebox.model.CollectionSyncMetadata
 import com.joergi.jukebox.service.DiscogsService
+import com.joergi.jukebox.storage.SecureStorage
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
@@ -17,6 +19,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -542,6 +545,142 @@ class CollectionViewModelTest {
 
             // When no SecureStorage is provided, write is a no-op; but state must update
             vm.uiState.value.notificationIntervalMinutes shouldBe 60L
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Reminder scheduling ───────────────────────────────────────────────────
+
+    @Test
+    fun `searchAndHighlightAlbum finds exact match by artist and title`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """
+                {"pagination":{"pages":1,"items":2},"releases":[
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Dark Side","artists":[{"name":"Pink Floyd"}],"formats":[{"name":"Vinyl"}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                ]}
+                """.trimIndent(),
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.searchAndHighlightAlbum("Pink Floyd", "Dark Side")
+            val state = awaitItem()
+            
+            state.highlightedItem.shouldNotBeNull()
+            state.highlightedItem!!.title shouldBe "Dark Side"
+            state.highlightedItem!!.artists.any { it.contains("Pink Floyd") } shouldBe true
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `searchAndHighlightAlbum falls back to partial title match`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """
+                {"pagination":{"pages":1,"items":1},"releases":[
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                ]}
+                """.trimIndent(),
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            // Search with non-matching artist but partial title match
+            vm.searchAndHighlightAlbum("Unknown Artist", "Road")
+            val state = awaitItem()
+            
+            state.highlightedItem.shouldNotBeNull()
+            state.highlightedItem!!.title shouldBe "Abbey Road"
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `searchAndHighlightAlbum clears letter filter before highlighting`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """
+                {"pagination":{"pages":1,"items":2},"releases":[
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Album A","artists":[{"name":"Artist A"}],"formats":[{"name":"Vinyl"}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"Beatles Album","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                ]}
+                """.trimIndent(),
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            // Apply a letter filter first
+            vm.filterLetter('A')
+            awaitItem() // consume filter state
+
+            // Now search for a Beatles album (doesn't match 'A' filter)
+            vm.searchAndHighlightAlbum("The Beatles", "Beatles Album")
+            val state = awaitItem()
+            
+            state.selectedFilter.shouldBeNull() // filter should be cleared
+            state.highlightedItem.shouldNotBeNull()
+            state.highlightedItem!!.title shouldBe "Beatles Album"
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Dark mode (basic state test) ───────────────────────────────────────────
+
+    @Test
+    fun `default dark mode is true`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.uiState.value.isDarkMode shouldBe true // default is true
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setDarkMode updates dark mode state`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            vm.setDarkMode(false)
+            val updated = awaitItem()
+            updated.isDarkMode shouldBe false
+
+            vm.setDarkMode(true)
+            val reEnabled = awaitItem()
+            reEnabled.isDarkMode shouldBe true
 
             cancelAndIgnoreRemainingEvents()
         }

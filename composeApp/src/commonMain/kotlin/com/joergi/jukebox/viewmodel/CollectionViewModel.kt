@@ -135,31 +135,52 @@ class CollectionViewModel(
 
     // Synchronization state
     private var syncTimer: Job? = null
-    private var reminderJob: Job? = null
-    private companion object {
-        private const val SYNC_INTERVAL_MS = 3 * 60 * 60 * 1000L  // 3 hours
-    }
+     private var reminderJob: Job? = null
+     private companion object {
+         private const val SYNC_INTERVAL_MS = 60 * 60 * 1000L  // 1 hour
+     }
 
     init {
-        viewModelScope.launch {
-            restoreFromCache()
-            syncAllPages()
-            loadAndApplyNotificationInterval()
-            loadAndApplyDarkMode()
-            loadAndApplySelectedRecordsHistory()
-        }
-    }
+         viewModelScope.launch {
+             restoreFromCache()
+             val hasCache = _uiState.value.items.isNotEmpty()
+             
+             loadAndApplyNotificationInterval()
+             loadAndApplyDarkMode()
+             loadAndApplySelectedRecordsHistory()
+             loadAndApplyHighlightedItem()
+             
+             if (!hasCache) {
+                 // First app start: sync all records from Discogs
+                 syncAllPages()
+             } else {
+                 // Subsequent starts: cache is loaded, schedule hourly incremental sync
+                 scheduleHourlyIncrementalSync()
+                 // Schedule the reminder with the loaded interval
+                 scheduleReminder(_uiState.value.notificationIntervalMinutes)
+             }
+         }
+     }
 
-    override fun onCleared() {
-        super.onCleared()
-        syncTimer?.cancel()
-        syncTimer = null
-        reminderJob?.cancel()
-        reminderJob = null
-        NotificationService.cancelRandomReminder()
-    }
+     override fun onCleared() {
+         super.onCleared()
+         syncTimer?.cancel()
+         syncTimer = null
+         reminderJob?.cancel()
+         reminderJob = null
+         NotificationService.cancelRandomReminder()
+     }
 
-    // ── Cache ─────────────────────────────────────────────────────────────────
+     /**
+      * Schedule hourly incremental sync when app starts.
+      * This checks for new records every hour without blocking the UI.
+      */
+     private suspend fun scheduleHourlyIncrementalSync() {
+         // Perform first incremental sync after 1 hour
+         scheduleNextSync()
+     }
+
+     // ── Cache ─────────────────────────────────────────────────────────────────
 
     private suspend fun restoreFromCache() {
         val json = readCache() ?: return
@@ -190,56 +211,62 @@ class CollectionViewModel(
 
     // ── Full sync ─────────────────────────────────────────────────────────────
 
-    /**
-     * Fetches every page from the Discogs API, accumulating items and
-     * reporting progress via [CollectionUiState.syncProgress].
-     * Persists the complete list to cache when finished.
-     */
-    private suspend fun syncAllPages() {
-        var page = 1
-        var totalPages = 1
-        val allItems = mutableListOf<CollectionItem>()
+     /**
+      * Fetches every page from the Discogs API, accumulating items and
+      * reporting progress via [CollectionUiState.syncProgress].
+      * Persists the complete list to cache when finished.
+      */
+     private suspend fun syncAllPages() {
+         var page = 1
+         var totalPages = 1
+         val allItems = mutableListOf<CollectionItem>()
 
-        _uiState.update { it.copy(syncProgress = 0f) }
+         _uiState.update { it.copy(syncProgress = 0f) }
 
-        while (page <= totalPages) {
-            runCatching {
-                service.getCollection(username = username, page = page, perPage = perPage)
-            }.onSuccess { result ->
-                totalPages = result.totalPages
-                allItems += result.items
+         while (page <= totalPages) {
+             runCatching {
+                 service.getCollection(username = username, page = page, perPage = perPage)
+             }.onSuccess { result ->
+                 totalPages = result.totalPages
+                 allItems += result.items
 
-                val progress = page.toFloat() / totalPages.toFloat()
-                _uiState.update { state ->
-                    state.copy(
-                        items = allItems.toList(),
-                        currentPage = page,
-                        totalPages = totalPages,
-                        totalItems = result.totalItems,
-                        isLoading = false,
-                        error = null,
-                        syncProgress = if (page < totalPages) progress else null,
-                    )
-                }
-                page++
-            }.onFailure { e ->
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        syncProgress = null,
-                        error = "Failed to load collection: ${e.message}",
-                    )
-                }
-                return
-            }
-        }
+                 val progress = page.toFloat() / totalPages.toFloat()
+                 _uiState.update { state ->
+                     state.copy(
+                         items = allItems.toList(),
+                         currentPage = page,
+                         totalPages = totalPages,
+                         totalItems = result.totalItems,
+                         isLoading = false,
+                         error = null,
+                         syncProgress = if (page < totalPages) progress else null,
+                     )
+                 }
+                 page++
+             }.onFailure { e ->
+                 _uiState.update {
+                     it.copy(
+                         isLoading = false,
+                         syncProgress = null,
+                         error = "Failed to load collection: ${e.message}",
+                         syncState = SyncState.Error("Failed to load collection: ${e.message}", e),
+                     )
+                 }
+                 return
+             }
+         }
 
-        // Persist the freshly fetched full collection
-        persistToCache(allItems)
-        
-        // Schedule reminder only after the full collection has been loaded
-        val intervalMinutes = _uiState.value.notificationIntervalMinutes
-        if (storage != null) scheduleReminder(intervalMinutes)
+         // Persist the freshly fetched full collection
+         persistToCache(allItems)
+         
+         // Mark sync as complete
+         _uiState.update {
+             it.copy(syncState = SyncState.Complete)
+         }
+         
+         // Schedule reminder only after the full collection has been loaded
+         val intervalMinutes = _uiState.value.notificationIntervalMinutes
+         if (storage != null) scheduleReminder(intervalMinutes)
     }
 
     // ── Incremental Sync ──────────────────────────────────────────────────────
@@ -569,6 +596,9 @@ class CollectionViewModel(
                     scrollToIndex = if (index >= 0) index else null,
                 )
             }
+            viewModelScope.launch {
+                persistHighlightedItem(picked)
+            }
         }
     }
 
@@ -580,12 +610,16 @@ class CollectionViewModel(
     /** Clears the random highlight. */
     fun clearHighlight() {
         _uiState.update { it.copy(highlightedItem = null, scrollToIndex = null) }
+        viewModelScope.launch {
+            persistHighlightedItem(null)
+        }
     }
 
     /**
      * Searches for an album by artist and title (from notification click).
      * Highlights the matching album and scrolls to it.
      * If no exact match found, tries partial match on title.
+     * Works on the complete local collection (no sync needed).
      */
     fun searchAndHighlightAlbum(artist: String, title: String) {
         viewModelScope.launch {
@@ -607,6 +641,7 @@ class CollectionViewModel(
                         scrollToIndex = if (index >= 0) index else null,
                     )
                 }
+                persistHighlightedItem(exactMatch)
                 return@launch
             }
             
@@ -624,6 +659,7 @@ class CollectionViewModel(
                         scrollToIndex = if (index >= 0) index else null,
                     )
                 }
+                persistHighlightedItem(partialMatch)
             }
         }
     }
@@ -697,6 +733,7 @@ class CollectionViewModel(
         val index = items.indexOf(picked)
         viewModelScope.launch {
             addToSelectedRecordsHistory(picked)
+            persistHighlightedItem(picked)
         }
         _uiState.update {
             it.copy(
@@ -765,6 +802,56 @@ class CollectionViewModel(
             } catch (e: Exception) {
                 log("SelectedRecordsHistory", "Failed to clear history: ${e.message}", e)
             }
+        }
+    }
+
+    // ── Highlighted Item Persistence ──────────────────────────────────────────
+
+    /**
+     * Loads the previously highlighted item from storage and applies it to the current collection.
+     * This ensures the selected record persists between app sessions.
+     */
+    private suspend fun loadAndApplyHighlightedItem() {
+        try {
+            val json = storage?.read(StorageKeys.currentHighlightedItem(username))
+            val highlighted = json?.let {
+                runCatching {
+                    cacheJson.decodeFromString<CollectionItem>(it)
+                }.getOrNull()
+            }
+            
+            if (highlighted != null) {
+                // Find it in the current items list and set as highlighted
+                val items = _uiState.value.items
+                val index = items.indexOfFirst { it.instanceId == highlighted.instanceId }
+                if (index >= 0) {
+                    _uiState.update {
+                        it.copy(
+                            highlightedItem = highlighted,
+                            scrollToIndex = index
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log("HighlightedItem", "Failed to load highlighted item: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Persists the currently highlighted item to storage.
+     * Called whenever the highlighted item changes.
+     */
+    private suspend fun persistHighlightedItem(item: CollectionItem?) {
+        try {
+            if (item != null) {
+                val json = cacheJson.encodeToString(item)
+                storage?.write(StorageKeys.currentHighlightedItem(username), json)
+            } else {
+                storage?.delete(StorageKeys.currentHighlightedItem(username))
+            }
+        } catch (e: Exception) {
+            log("HighlightedItem", "Failed to persist highlighted item: ${e.message}", e)
         }
     }
 
