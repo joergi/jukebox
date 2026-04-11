@@ -1,6 +1,7 @@
 package com.joergi.jukebox.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -21,10 +22,22 @@ object ReminderScheduler {
      *
      * Uses [ExistingPeriodicWorkPolicy.UPDATE] so rescheduling with a new interval
      * cancels the previous chain rather than stacking multiple workers.
+     *
+     * **Note:** WorkManager enforces a minimum interval of 15 minutes on Android.
+     * If [intervalMinutes] is less than 15, it will be silently clamped to 15 minutes
+     * by the OS, not by this code.
      */
     fun schedule(context: Context, intervalMinutes: Long) {
+        val actualInterval = intervalMinutes.coerceAtLeast(15)
+        if (intervalMinutes < 15) {
+            Log.w(
+                "ReminderScheduler",
+                "Requested interval of ${intervalMinutes}m is below WorkManager minimum of 15m. " +
+                "Will use 15 minutes instead."
+            )
+        }
         val request = PeriodicWorkRequestBuilder<ReminderWorker>(
-            intervalMinutes,
+            actualInterval,
             TimeUnit.MINUTES,
         ).build()
 

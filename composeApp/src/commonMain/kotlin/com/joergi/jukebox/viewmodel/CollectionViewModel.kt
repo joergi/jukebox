@@ -56,10 +56,14 @@ data class CollectionUiState(
     val syncState: SyncState = SyncState.Idle,
     val syncMetadata: CollectionSyncMetadata? = null,
     val newRecordsCount: Int = 0,
-    /** Current random-reminder interval in minutes. Default 1. */
+    /** Current random-reminder interval in minutes. Default 15. */
     val notificationIntervalMinutes: Long = DEFAULT_NOTIFICATION_INTERVAL_MINUTES,
-    /** Seconds remaining until the next random pick. Null when no reminder is scheduled. */
-    val reminderCountdownSeconds: Long? = null,
+     /** Seconds remaining until the next random pick. Null when no reminder is scheduled. */
+     val reminderCountdownSeconds: Long? = null,
+     /** Dark mode enabled. Default true. */
+     val isDarkMode: Boolean = true,
+     /** History of randomly selected records. */
+     val selectedRecordsHistory: List<CollectionItem> = emptyList(),
 ) {
     val hasMore: Boolean get() = currentPage < totalPages
     val isEmpty: Boolean get() = items.isEmpty() && !isLoading && error == null
@@ -141,6 +145,8 @@ class CollectionViewModel(
             restoreFromCache()
             syncAllPages()
             loadAndApplyNotificationInterval()
+            loadAndApplyDarkMode()
+            loadAndApplySelectedRecordsHistory()
         }
     }
 
@@ -230,6 +236,10 @@ class CollectionViewModel(
 
         // Persist the freshly fetched full collection
         persistToCache(allItems)
+        
+        // Schedule reminder only after the full collection has been loaded
+        val intervalMinutes = _uiState.value.notificationIntervalMinutes
+        if (storage != null) scheduleReminder(intervalMinutes)
     }
 
     // ── Incremental Sync ──────────────────────────────────────────────────────
@@ -572,6 +582,52 @@ class CollectionViewModel(
         _uiState.update { it.copy(highlightedItem = null, scrollToIndex = null) }
     }
 
+    /**
+     * Searches for an album by artist and title (from notification click).
+     * Highlights the matching album and scrolls to it.
+     * If no exact match found, tries partial match on title.
+     */
+    fun searchAndHighlightAlbum(artist: String, title: String) {
+        viewModelScope.launch {
+            val items = _uiState.value.items
+            if (items.isEmpty()) return@launch
+            
+            // Try exact match: artist contains the notification artist AND title matches
+            val exactMatch = items.firstOrNull { item ->
+                item.title.equals(title, ignoreCase = true) &&
+                item.artists.any { it.contains(artist, ignoreCase = true) }
+            }
+            
+            if (exactMatch != null) {
+                val index = items.indexOf(exactMatch)
+                _uiState.update {
+                    it.copy(
+                        selectedFilter = null,
+                        highlightedItem = exactMatch,
+                        scrollToIndex = if (index >= 0) index else null,
+                    )
+                }
+                return@launch
+            }
+            
+            // Fallback: partial match on title only
+            val partialMatch = items.firstOrNull { item ->
+                item.title.contains(title, ignoreCase = true)
+            }
+            
+            if (partialMatch != null) {
+                val index = items.indexOf(partialMatch)
+                _uiState.update {
+                    it.copy(
+                        selectedFilter = null,
+                        highlightedItem = partialMatch,
+                        scrollToIndex = if (index >= 0) index else null,
+                    )
+                }
+            }
+        }
+    }
+
     // ── Notification interval ─────────────────────────────────────────────────
 
     /**
@@ -583,9 +639,8 @@ class CollectionViewModel(
             ?.toLongOrNull()
             ?: CollectionUiState.DEFAULT_NOTIFICATION_INTERVAL_MINUTES
         _uiState.update { it.copy(notificationIntervalMinutes = saved) }
-        // Only schedule the in-process reminder when backed by real storage.
-        // Without storage (e.g. in tests) the infinite delay loop would hang.
-        if (storage != null) scheduleReminder(saved)
+        // Reminder scheduling is now deferred until after collection sync completes
+        // (see syncAllPages method)
     }
 
     /**
@@ -600,29 +655,39 @@ class CollectionViewModel(
         }
     }
 
-    private fun scheduleReminder(intervalMinutes: Long) {
-        reminderJob?.cancel()
-        reminderJob = viewModelScope.launch {
-            val intervalSeconds = intervalMinutes * 60L
-            while (true) {
-                // Tick countdown every second
-                var remaining = intervalSeconds
-                while (remaining > 0) {
-                    _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
-                    delay(1_000L)
-                    remaining--
-                }
-                _uiState.update { it.copy(reminderCountdownSeconds = 0) }
-                forcePickRandom()
-                // Fire notification with the newly picked item
-                val picked = _uiState.value.highlightedItem
-                if (picked != null) {
-                    val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                    NotificationService.showRandomRecordNotification(artist, picked.title)
-                }
-            }
-        }
-    }
+     private fun scheduleReminder(intervalMinutes: Long) {
+         reminderJob?.cancel()
+         reminderJob = viewModelScope.launch {
+             val intervalSeconds = intervalMinutes * 60L
+             while (true) {
+                 // Tick countdown every second
+                 var remaining = intervalSeconds
+                 while (remaining > 0) {
+                     _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
+                     delay(1_000L)
+                     remaining--
+                 }
+                 _uiState.update { it.copy(reminderCountdownSeconds = 0) }
+                 forcePickRandom()
+                 // Fire notification with the newly picked item
+                 val picked = _uiState.value.highlightedItem
+                 if (picked != null) {
+                     val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                     NotificationService.showRandomRecordNotification(artist, picked.title)
+                 }
+             }
+         }
+         
+         // Also schedule the WorkManager-based reminder for background execution
+         NotificationService.scheduleRandomReminder(intervalMinutes) {
+             val items = _uiState.value.items
+             if (items.isEmpty()) null else {
+                 val picked = items.random()
+                 val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                 artist to picked.title
+             }
+         }
+     }
 
     /** Always picks a new random record, replacing any existing highlight. */
     private fun forcePickRandom() {
@@ -630,12 +695,76 @@ class CollectionViewModel(
         if (items.isEmpty()) return
         val picked = items.random()
         val index = items.indexOf(picked)
+        viewModelScope.launch {
+            addToSelectedRecordsHistory(picked)
+        }
         _uiState.update {
             it.copy(
                 selectedFilter = null,
                 highlightedItem = picked,
                 scrollToIndex = if (index >= 0) index else null,
             )
+        }
+    }
+
+     private suspend fun loadAndApplyDarkMode() {
+         val saved = storage?.read(StorageKeys.DARK_MODE)?.toBoolean() ?: true
+         _uiState.update { it.copy(isDarkMode = saved) }
+     }
+
+    fun setDarkMode(isDark: Boolean) {
+        viewModelScope.launch {
+            storage?.write(StorageKeys.DARK_MODE, isDark.toString())
+            _uiState.update { it.copy(isDarkMode = isDark) }
+        }
+    }
+
+    // ── Selected Records History ──────────────────────────────────────────
+
+    /**
+     * Loads the selected records history from storage and applies it to the UI state.
+     */
+    private suspend fun loadAndApplySelectedRecordsHistory() {
+        try {
+            val json = storage?.read(StorageKeys.selectedRecordsHistory(username))
+            val history = json?.let {
+                runCatching {
+                    cacheJson.decodeFromString<List<CollectionItem>>(it)
+                }.getOrNull() ?: emptyList()
+            } ?: emptyList()
+            _uiState.update { it.copy(selectedRecordsHistory = history) }
+        } catch (e: Exception) {
+            log("SelectedRecordsHistory", "Failed to load history: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Adds a record to the selected records history and persists it.
+     */
+    private suspend fun addToSelectedRecordsHistory(item: CollectionItem) {
+        val current = _uiState.value.selectedRecordsHistory
+        val updated = (listOf(item) + current).distinctBy { it.instanceId }
+        
+        try {
+            val json = cacheJson.encodeToString(updated)
+            storage?.write(StorageKeys.selectedRecordsHistory(username), json)
+            _uiState.update { it.copy(selectedRecordsHistory = updated) }
+        } catch (e: Exception) {
+            log("SelectedRecordsHistory", "Failed to save history: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Clears the selected records history and persists the change.
+     */
+    fun clearSelectedRecordsHistory() {
+        viewModelScope.launch {
+            try {
+                storage?.delete(StorageKeys.selectedRecordsHistory(username))
+                _uiState.update { it.copy(selectedRecordsHistory = emptyList()) }
+            } catch (e: Exception) {
+                log("SelectedRecordsHistory", "Failed to clear history: ${e.message}", e)
+            }
         }
     }
 

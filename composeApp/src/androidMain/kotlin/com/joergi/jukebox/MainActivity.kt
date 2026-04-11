@@ -75,6 +75,9 @@ class MainActivity : ComponentActivity() {
                 service = service,
                 storage = storage,
                 openUrl = openUrl,
+                notificationArtist = intent.getStringExtra("notification_artist"),
+                notificationTitle = intent.getStringExtra("notification_title"),
+                isFromNotification = intent.getBooleanExtra("from_notification", false),
             )
         }
     }

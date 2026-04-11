@@ -129,6 +129,18 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test) // runTest
             }
         }
+
+        val androidTest by creating {
+            dependsOn(commonTest)
+            dependencies {
+                implementation(libs.kotlin.test.junit)
+                implementation(libs.junit)
+                implementation("androidx.test:core:1.5.0")
+                implementation("androidx.test.ext:junit:1.1.5")
+                implementation("androidx.work:work-testing:2.10.1")
+                implementation(libs.androidx.work.runtime)
+            }
+        }
     }
 }
 

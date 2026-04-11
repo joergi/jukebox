@@ -2,8 +2,11 @@ package com.joergi.jukebox.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.core.app.NotificationCompat
+import com.joergi.jukebox.MainActivity
 import com.joergi.jukebox.worker.ReminderItemProvider
 import com.joergi.jukebox.worker.ReminderScheduler
 
@@ -12,6 +15,13 @@ actual object NotificationService {
 
     private const val CHANNEL_COLLECTIONS = "collections"
     private const val CHANNEL_REMINDERS = "jukebox_reminders"
+    
+    private const val REMINDER_NOTIFICATION_ID = 2000
+    
+    // Intent extras for notification click handling
+    private const val EXTRA_ARTIST = "notification_artist"
+    private const val EXTRA_TITLE = "notification_title"
+    private const val EXTRA_FROM_NOTIFICATION = "from_notification"
 
     fun initialize(ctx: Context) {
         context = ctx.applicationContext
@@ -60,13 +70,32 @@ actual object NotificationService {
         val ctx = context ?: return
         val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
+        
+        // Create Intent to open MainActivity with album info
+        val intent = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra(EXTRA_ARTIST, artist)
+            putExtra(EXTRA_TITLE, title)
+            putExtra(EXTRA_FROM_NOTIFICATION, true)
+        }
+        
+        // Create PendingIntent to open MainActivity when notification is clicked
+        val pendingIntent = PendingIntent.getActivity(
+            ctx,
+            REMINDER_NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        
         val notification = NotificationCompat.Builder(ctx, CHANNEL_REMINDERS)
             .setContentTitle("Jukebox Reminder")
             .setContentText("You have to play now this record: $artist \u2014 $title")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
             .build()
-        manager.notify(1002, notification)
+        // Use a fixed notification ID so new reminders replace old ones
+        manager.notify(REMINDER_NOTIFICATION_ID, notification)
     }
 
     /**

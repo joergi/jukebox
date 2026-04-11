@@ -159,11 +159,14 @@ fun CollectionScreen(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),
                     actions = {
-                        // Settings button
-                        IconButton(onClick = onNavigateToSettings) {
+                        // Random record button — picks a record or scrolls back to the current one
+                        IconButton(
+                            onClick = { viewModel.pickRandom() },
+                            enabled = uiState.items.isNotEmpty(),
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings",
+                                imageVector = Icons.Default.Casino,
+                                contentDescription = "Random record",
                             )
                         }
                         // Manual refresh button
@@ -176,14 +179,11 @@ fun CollectionScreen(
                                 contentDescription = "Manual refresh",
                             )
                         }
-                        // Random record button — picks a record or scrolls back to the current one
-                        IconButton(
-                            onClick = { viewModel.pickRandom() },
-                            enabled = uiState.items.isNotEmpty(),
-                        ) {
+                        // Settings button
+                        IconButton(onClick = onNavigateToSettings) {
                             Icon(
-                                imageVector = Icons.Default.Casino,
-                                contentDescription = "Random record",
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
                             )
                         }
                     },

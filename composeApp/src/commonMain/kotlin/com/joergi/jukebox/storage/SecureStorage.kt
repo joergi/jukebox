@@ -61,9 +61,15 @@ object StorageKeys {
     const val ACCESS_TOKEN = "discogs_access_token"
     const val ACCESS_TOKEN_SECRET = "discogs_access_token_secret"
     const val USERNAME = "discogs_username"
-    /** Interval in minutes between random-record reminder notifications. Default: 1. */
+    /** Interval in minutes between random-record reminder notifications. Default: 15. */
     const val RANDOM_NOTIFICATION_INTERVAL_MINUTES = "random_notification_interval_minutes"
+    /** Dark mode preference. Default: false (light mode). */
+    const val DARK_MODE = "dark_mode"
+    /** Seconds remaining on the current reminder countdown timer. */
+    const val REMINDER_COUNTDOWN_SECONDS = "reminder_countdown_seconds"
     fun collectionCache(username: String) = "collection_cache_$username"
     fun collectionSyncMetadata(username: String) = "collection_sync_metadata_$username"
     fun newestFiftyIds(username: String) = "newest_fifty_ids_$username"
+    fun selectedRecordsHistory(username: String) = "selected_records_history_$username"
+    fun currentHighlightedItem(username: String) = "current_highlighted_item_$username"
 }

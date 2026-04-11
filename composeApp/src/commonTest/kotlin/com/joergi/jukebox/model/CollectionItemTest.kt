@@ -27,7 +27,10 @@ class CollectionItemTest {
             basicInformation = DiscogsBasicInfoJson(
                 title = "OK Computer",
                 artists = listOf(DiscogsArtistJson("Radiohead")),
-                formats = listOf(DiscogsFormatJson("Vinyl"), DiscogsFormatJson("LP")),
+                formats = listOf(
+                    DiscogsFormatJson("Vinyl"),
+                    DiscogsFormatJson("Box Set")
+                ),
                 thumb = "https://example.com/thumb.jpg",
                 year = 1997,
                 labels = listOf(DiscogsLabelJson("Parlophone")),
@@ -40,7 +43,7 @@ class CollectionItemTest {
         item.id shouldBe 7
         item.title shouldBe "OK Computer"
         item.artists shouldContainExactly listOf("Radiohead")
-        item.formats shouldContainExactly listOf("Vinyl", "LP")
+        item.formats shouldContainExactly listOf("Vinyl", "Box Set")
         item.thumb shouldBe "https://example.com/thumb.jpg"
         item.year shouldBe 1997
         item.label shouldBe "Parlophone"
