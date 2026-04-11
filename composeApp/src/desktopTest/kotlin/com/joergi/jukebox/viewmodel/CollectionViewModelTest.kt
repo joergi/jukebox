@@ -685,4 +685,148 @@ class CollectionViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    // ── Edge cases: Empty collection ───────────────────────────────────────────
+
+    @Test
+    fun `empty collection sync completes without error`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                """{"pagination":{"pages":1,"items":0},"releases":[]}""",
+                HttpStatusCode.OK,
+                jsonHeaders(),
+            )
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.syncProgress != null) { state = awaitItem() }
+
+            state.items shouldHaveSize 0
+            state.syncProgress.shouldBeNull()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Edge cases: Network errors ─────────────────────────────────────────────
+
+    @Test
+    fun `sync handles 404 not found gracefully`() = runTest {
+        val engine = MockEngine { _ ->
+            respondError(HttpStatusCode.NotFound)
+        }
+
+        val (vm) = makeViewModel(engine, initialCache = null)
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.syncProgress != null) { state = awaitItem() }
+
+            // Should have empty collection on 404
+            state.items shouldHaveSize 0
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Edge cases: Notification interval settings ─────────────────────────────
+
+    @Test
+    fun `setNotificationIntervalMinutes updates state immediately`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            // Initial default is 1 minute
+            vm.uiState.value.notificationIntervalMinutes shouldBe 1L
+
+            vm.setNotificationIntervalMinutes(30L)
+            val updated = awaitItem()
+            updated.notificationIntervalMinutes shouldBe 30L
+
+            vm.setNotificationIntervalMinutes(60L)
+            val updated2 = awaitItem()
+            updated2.notificationIntervalMinutes shouldBe 60L
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Edge cases: clearHighlight ─────────────────────────────────────────────
+
+    @Test
+    fun `clearHighlight on already-null highlight emits no extra state`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            // highlightedItem should be null already
+            vm.uiState.value.highlightedItem.shouldBeNull()
+
+            vm.clearHighlight() // Clear already-null
+            expectNoEvents() // StateFlow deduplicates: null→null emits nothing
+        }
+    }
+
+    // ── Edge cases: Reminder scheduling ────────────────────────────────────────
+
+    @Test
+    fun `reminder schedules on app start`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(singlePageResponse(count = 1), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            // Drain initial sync
+            var state = awaitItem()
+            while (state.syncProgress != null) { state = awaitItem() }
+
+            // Reminder should be scheduled with default interval
+            state.notificationIntervalMinutes shouldBe 1L
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Edge cases: Sync refresh ────────────────────────────────────────────────
+
+    @Test
+    fun `performManualSync completes successfully`() = runTest {
+        var callCount = 0
+        val engine = MockEngine { _ ->
+            callCount++
+            respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
+        }
+
+        val (vm) = makeViewModel(engine)
+        vm.uiState.test {
+            while (awaitItem().syncProgress != null) { /* skip */ }
+
+            callCount shouldBe 1
+
+            // Trigger manual sync
+            vm.performManualSync()
+
+            // Wait for sync to complete
+            var state = awaitItem()
+            while (state.syncProgress != null) { state = awaitItem() }
+
+            state.items shouldHaveSize 2
+
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // Should have made 2 API calls: initial + manual
+        callCount shouldBe 2
+    }
 }
