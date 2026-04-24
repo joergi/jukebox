@@ -137,6 +137,7 @@ kotlin {
                 implementation(libs.junit)
                 implementation("androidx.test:core:1.5.0")
                 implementation("androidx.test.ext:junit:1.1.5")
+                implementation("androidx.test:runner:1.5.2")
                 implementation("androidx.work:work-testing:2.10.1")
                 implementation(libs.androidx.work.runtime)
             }
