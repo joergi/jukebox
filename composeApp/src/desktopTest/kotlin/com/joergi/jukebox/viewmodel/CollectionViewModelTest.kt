@@ -28,6 +28,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Unit tests for [CollectionViewModel].
@@ -207,7 +208,7 @@ class CollectionViewModelTest {
     // ── filterLetter ──────────────────────────────────────────────────────────
 
     @Test
-    fun `filterLetter filters already-loaded items without triggering extra page loads`() = runTest {
+    fun `filterLetter filters already-loaded items without triggering extra page loads`() = runTest(timeout = 10000.milliseconds) {
         var callCount = 0
         val engine = MockEngine { _ ->
             callCount++
@@ -463,7 +464,7 @@ class CollectionViewModelTest {
     }
 
     @Test
-    fun `clearHighlight removes both highlightedItem and scrollToIndex`() = runTest {
+    fun `clearHighlight removes both highlightedItem and scrollToIndex`() = runTest(timeout = 10000.milliseconds) {
         val engine = MockEngine { _ ->
             respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
         }
