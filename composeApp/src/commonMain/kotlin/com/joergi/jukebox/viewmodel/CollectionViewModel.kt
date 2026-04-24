@@ -12,6 +12,7 @@ import com.joergi.jukebox.storage.SecureStorage
 import com.joergi.jukebox.storage.StorageKeys
 import com.joergi.jukebox.util.Logger
 import com.joergi.jukebox.util.TimeProvider
+import com.joergi.jukebox.util.isAndroidPlatform
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,8 +59,6 @@ data class CollectionUiState(
     val newRecordsCount: Int = 0,
     /** Current random-reminder interval in minutes. Default 15. */
     val notificationIntervalMinutes: Long = DEFAULT_NOTIFICATION_INTERVAL_MINUTES,
-     /** Seconds remaining until the next random pick. Null when no reminder is scheduled. */
-     val reminderCountdownSeconds: Long? = null,
      /** Dark mode enabled. Default true. */
      val isDarkMode: Boolean = true,
      /** History of randomly selected records. */
@@ -705,37 +704,37 @@ class CollectionViewModel(
 
       private fun scheduleReminder(intervalMinutes: Long) {
           reminderJob?.cancel()
-          reminderJob = viewModelScope.launch {
-              while (true) {
-                  // Calculate milliseconds until next slot
-                  val delayMs = getMillisUntilNextSlot(intervalMinutes)
-                  val intervalSeconds = intervalMinutes * 60L
-                  
-                  // Tick countdown every second
-                  var remaining = (delayMs + 999) / 1_000L  // Round up to next second
-                  while (remaining > 0) {
-                      _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
-                      delay(1_000L)
-                      remaining--
-                  }
-                  _uiState.update { it.copy(reminderCountdownSeconds = 0) }
-                  forcePickRandom()
-                  // Fire notification with the newly picked item
-                  val picked = _uiState.value.highlightedItem
-                  if (picked != null) {
+          
+          if (isAndroidPlatform()) {
+              // On Android: Use WorkManager only (background-safe)
+              // No in-app coroutine loop to avoid duplicate schedulers
+              NotificationService.scheduleRandomReminder(intervalMinutes) {
+                  val items = _uiState.value.items
+                  if (items.isEmpty()) null else {
+                      val picked = items.random()
                       val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                      NotificationService.showRandomRecordNotification(artist, picked.title)
+                      artist to picked.title
                   }
               }
-          }
-          
-          // Also schedule the WorkManager-based reminder for background execution
-          NotificationService.scheduleRandomReminder(intervalMinutes) {
-              val items = _uiState.value.items
-              if (items.isEmpty()) null else {
-                  val picked = items.random()
-                  val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                  artist to picked.title
+          } else {
+              // On Desktop/iOS: Use in-app coroutine scheduler
+              // (WorkManager is not available, NotificationService.scheduleRandomReminder is a no-op)
+              reminderJob = viewModelScope.launch {
+                  while (true) {
+                      // Calculate milliseconds until next slot
+                      val delayMs = getMillisUntilNextSlot(intervalMinutes)
+                      
+                      // Wait until the next slot (no need to tick every second)
+                      delay(delayMs)
+                      
+                      // Fire notification and pick random record
+                      forcePickRandom()
+                      val picked = _uiState.value.highlightedItem
+                      if (picked != null) {
+                          val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                          NotificationService.showRandomRecordNotification(artist, picked.title)
+                      }
+                  }
               }
           }
       }

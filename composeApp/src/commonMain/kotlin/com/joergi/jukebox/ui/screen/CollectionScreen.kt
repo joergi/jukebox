@@ -27,6 +27,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
@@ -207,11 +212,29 @@ fun CollectionScreen(
         },
         bottomBar = {
             Column {
-                val countdown = uiState.reminderCountdownSeconds
-                if (countdown != null) {
+                // Only show countdown if reminder interval is set (> 0)
+                if (uiState.notificationIntervalMinutes > 0) {
+                    // Calculate countdown dynamically based on current time
+                    var countdownSeconds by remember { mutableStateOf(0L) }
+                    
+                    LaunchedEffect(uiState.notificationIntervalMinutes) {
+                        while (true) {
+                            val now = System.currentTimeMillis()
+                            val totalMinutes = now / 60_000L
+                            val intervalMinutes = uiState.notificationIntervalMinutes
+                            val nextSlot = ((totalMinutes / intervalMinutes) + 1) * intervalMinutes
+                            val nextSlotMs = nextSlot * 60_000L
+                            val remainingMs = nextSlotMs - now
+                            countdownSeconds = (remainingMs + 999) / 1_000L  // Round up to next second
+                            
+                            // Update every second
+                            kotlinx.coroutines.delay(1_000L)
+                        }
+                    }
+                    
                     Surface(tonalElevation = 2.dp) {
                         Text(
-                            text = formatCountdown(countdown),
+                            text = formatCountdown(countdownSeconds),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             modifier = Modifier
