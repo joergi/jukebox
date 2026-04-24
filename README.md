@@ -43,3 +43,43 @@ Build a distributable (`.deb`, `.msi`, `.dmg`):
 ```
 ./gradlew :composeApp:createDistributable
 ```
+
+## Testing
+
+### Run All Tests
+
+Run all tests across all platforms:
+```bash
+./gradlew test
+```
+
+### Linux Desktop Tests
+
+Run desktop JVM tests:
+```bash
+./gradlew composeApp:desktopTest
+```
+
+Run desktop UI tests with virtual display (matches CI):
+```bash
+xvfb-run -a ./gradlew composeApp:desktopTest
+```
+
+### Android Tests
+
+Run Android unit tests:
+```bash
+./gradlew composeApp:testDebugUnitTest
+```
+
+Run Android instrumented tests (requires connected device or emulator):
+```bash
+./gradlew composeApp:connectedAndroidTest
+```
+
+### Test Reports
+
+After running tests, view HTML reports at:
+- Desktop tests: `composeApp/build/reports/tests/desktopTest/index.html`
+- Android unit tests: `composeApp/build/reports/tests/testDebugUnitTest/index.html`
+- Android instrumented tests: `composeApp/build/reports/androidTests/connected/index.html`
