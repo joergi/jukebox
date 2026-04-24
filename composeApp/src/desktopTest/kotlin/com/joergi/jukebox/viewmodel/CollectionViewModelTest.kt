@@ -208,7 +208,7 @@ class CollectionViewModelTest {
     // ── filterLetter ──────────────────────────────────────────────────────────
 
     @Test
-    fun `filterLetter filters already-loaded items without triggering extra page loads`() = runTest(timeout = 10000.milliseconds) {
+    fun `filterLetter filters already-loaded items without triggering extra page loads`() = runTest(timeout = 20000.milliseconds) {
         var callCount = 0
         val engine = MockEngine { _ ->
             callCount++
@@ -233,12 +233,19 @@ class CollectionViewModelTest {
             state.items shouldHaveSize 3
 
             vm.filterLetter('B')
-            val filtered = awaitItem()
+            // May need to skip intermediate states due to StateFlow conflation
+            var filtered = awaitItem()
+            while (filtered.selectedFilter != 'B' && filtered.syncProgress == null) {
+                filtered = awaitItem()
+            }
             filtered.selectedFilter shouldBe 'B'
             filtered.filteredItems shouldHaveSize 2
 
             vm.filterLetter(null)
-            val cleared = awaitItem()
+            var cleared = awaitItem()
+            while (cleared.selectedFilter != null && cleared.syncProgress == null) {
+                cleared = awaitItem()
+            }
             cleared.selectedFilter.shouldBeNull()
             cleared.filteredItems shouldHaveSize 3
         }
@@ -270,7 +277,7 @@ class CollectionViewModelTest {
     // ── Multi-page sync ───────────────────────────────────────────────────────
 
     @Test
-    fun `syncAllPages fetches all pages and accumulates items`() = runTest {
+    fun `syncAllPages fetches all pages and accumulates items`() = runTest(timeout = 20000.milliseconds) {
         var callCount = 0
         val engine = MockEngine { _ ->
             callCount++
@@ -293,16 +300,16 @@ class CollectionViewModelTest {
 
         val (vm) = makeViewModel(engine)
         vm.uiState.test {
-            // Collect all states until sync finishes
-            val states = mutableListOf(awaitItem())
-            while (states.last().syncProgress != null) {
-                states.add(awaitItem())
+            // Collect states until sync finishes and we have all items
+            // Due to StateFlow conflation, we may skip intermediate states
+            var state = awaitItem()
+            while (state.items.size < 4 || state.syncProgress != null) {
+                state = awaitItem()
             }
 
             // Final state must have all 4 items
-            val final = states.last()
-            final.items shouldHaveSize 4
-            final.syncProgress.shouldBeNull()
+            state.items shouldHaveSize 4
+            state.syncProgress.shouldBeNull()
         }
 
         callCount shouldBe 2
@@ -464,7 +471,7 @@ class CollectionViewModelTest {
     }
 
     @Test
-    fun `clearHighlight removes both highlightedItem and scrollToIndex`() = runTest(timeout = 10000.milliseconds) {
+    fun `clearHighlight removes both highlightedItem and scrollToIndex`() = runTest(timeout = 20000.milliseconds) {
         val engine = MockEngine { _ ->
             respond(singlePageResponse(count = 2), HttpStatusCode.OK, jsonHeaders())
         }

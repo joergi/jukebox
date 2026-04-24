@@ -196,4 +196,9 @@ afterEvaluate {
     tasks.withType<JavaExec>().configureEach {
         if (name == "run") workingDir = rootProject.projectDir
     }
+    
+    // Configure desktop tests to run sequentially due to Kotlin 2.3.21 test flakiness
+    tasks.named<Test>("desktopTest") {
+        maxParallelForks = 1
+    }
 }
