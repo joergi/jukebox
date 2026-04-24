@@ -742,8 +742,8 @@ class CollectionViewModelTest {
         vm.uiState.test {
             while (awaitItem().syncProgress != null) { /* skip */ }
 
-            // Initial default is 1 minute
-            vm.uiState.value.notificationIntervalMinutes shouldBe 1L
+            // Initial default is 15 minutes
+            vm.uiState.value.notificationIntervalMinutes shouldBe 15L
 
             vm.setNotificationIntervalMinutes(30L)
             val updated = awaitItem()
@@ -791,8 +791,8 @@ class CollectionViewModelTest {
             var state = awaitItem()
             while (state.syncProgress != null) { state = awaitItem() }
 
-            // Reminder should be scheduled with default interval
-            state.notificationIntervalMinutes shouldBe 1L
+            // Reminder should be scheduled with default interval (15 minutes)
+            state.notificationIntervalMinutes shouldBe 15L
 
             cancelAndIgnoreRemainingEvents()
         }

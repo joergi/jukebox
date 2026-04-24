@@ -691,39 +691,54 @@ class CollectionViewModel(
         }
     }
 
-     private fun scheduleReminder(intervalMinutes: Long) {
-         reminderJob?.cancel()
-         reminderJob = viewModelScope.launch {
-             val intervalSeconds = intervalMinutes * 60L
-             while (true) {
-                 // Tick countdown every second
-                 var remaining = intervalSeconds
-                 while (remaining > 0) {
-                     _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
-                     delay(1_000L)
-                     remaining--
-                 }
-                 _uiState.update { it.copy(reminderCountdownSeconds = 0) }
-                 forcePickRandom()
-                 // Fire notification with the newly picked item
-                 val picked = _uiState.value.highlightedItem
-                 if (picked != null) {
-                     val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                     NotificationService.showRandomRecordNotification(artist, picked.title)
-                 }
-             }
-         }
-         
-         // Also schedule the WorkManager-based reminder for background execution
-         NotificationService.scheduleRandomReminder(intervalMinutes) {
-             val items = _uiState.value.items
-             if (items.isEmpty()) null else {
-                 val picked = items.random()
-                 val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                 artist to picked.title
-             }
-         }
-     }
+      /**
+       * Calculates milliseconds until the next aligned slot.
+       * For example, with interval=15 and current time 14:32:45, returns ms until 14:45:00.
+       */
+      private fun getMillisUntilNextSlot(intervalMinutes: Long): Long {
+          val now = System.currentTimeMillis()
+          val totalMinutes = now / 60_000L
+          val nextSlot = ((totalMinutes / intervalMinutes) + 1) * intervalMinutes
+          val nextSlotMs = nextSlot * 60_000L
+          return nextSlotMs - now
+      }
+
+      private fun scheduleReminder(intervalMinutes: Long) {
+          reminderJob?.cancel()
+          reminderJob = viewModelScope.launch {
+              while (true) {
+                  // Calculate milliseconds until next slot
+                  val delayMs = getMillisUntilNextSlot(intervalMinutes)
+                  val intervalSeconds = intervalMinutes * 60L
+                  
+                  // Tick countdown every second
+                  var remaining = (delayMs + 999) / 1_000L  // Round up to next second
+                  while (remaining > 0) {
+                      _uiState.update { it.copy(reminderCountdownSeconds = remaining) }
+                      delay(1_000L)
+                      remaining--
+                  }
+                  _uiState.update { it.copy(reminderCountdownSeconds = 0) }
+                  forcePickRandom()
+                  // Fire notification with the newly picked item
+                  val picked = _uiState.value.highlightedItem
+                  if (picked != null) {
+                      val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                      NotificationService.showRandomRecordNotification(artist, picked.title)
+                  }
+              }
+          }
+          
+          // Also schedule the WorkManager-based reminder for background execution
+          NotificationService.scheduleRandomReminder(intervalMinutes) {
+              val items = _uiState.value.items
+              if (items.isEmpty()) null else {
+                  val picked = items.random()
+                  val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
+                  artist to picked.title
+              }
+          }
+      }
 
     /** Always picks a new random record, replacing any existing highlight. */
     private fun forcePickRandom() {
