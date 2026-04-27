@@ -22,7 +22,7 @@ A Kotlin Multiplatform app for browsing your Discogs vinyl collection. Targets A
 
 Build a debug APK:
 ```bash
-./gradlew :composeApp:assembleDebug
+./gradlew clean :composeApp:assembleDebug
 ```
 
 The APK will be at:
@@ -36,7 +36,7 @@ Send that file to your device and install it (allow installs from unknown source
 
 Run locally:
 ```bash
-./gradlew :composeApp:run
+./gradlew clean :composeApp:run
 ```
 
 ### Android Emulator
