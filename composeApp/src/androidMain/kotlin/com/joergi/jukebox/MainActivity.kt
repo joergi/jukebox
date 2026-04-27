@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +26,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        private const val TAG = "MainActivity"
+    }
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -70,14 +75,25 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Extract notification extras from Intent
+        val notificationArtist = intent.getStringExtra("notification_artist")
+        val notificationTitle = intent.getStringExtra("notification_title")
+        val notificationInstanceId = if (intent.hasExtra("notification_instance_id")) {
+            intent.getIntExtra("notification_instance_id", -1)
+        } else null
+        val isFromNotification = intent.getBooleanExtra("from_notification", false)
+        
+        Log.d(TAG, "onCreate() - Intent extras: artist='$notificationArtist', title='$notificationTitle', instanceId=$notificationInstanceId, isFromNotification=$isFromNotification")
+
         setContent {
             App(
                 service = service,
                 storage = storage,
                 openUrl = openUrl,
-                notificationArtist = intent.getStringExtra("notification_artist"),
-                notificationTitle = intent.getStringExtra("notification_title"),
-                isFromNotification = intent.getBooleanExtra("from_notification", false),
+                notificationArtist = notificationArtist,
+                notificationTitle = notificationTitle,
+                notificationInstanceId = notificationInstanceId,
+                isFromNotification = isFromNotification,
             )
         }
     }

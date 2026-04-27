@@ -15,6 +15,11 @@ import java.util.concurrent.TimeUnit
  * 
  * Uses cron-style scheduling: reminders fire at aligned time slots
  * (e.g., with 15-minute interval: 14:00, 14:15, 14:30, 14:45, 15:00, etc.)
+ * 
+ * **Important:** The `setInitialDelay()` approach has limitations with WorkManager's
+ * internal scheduling. To ensure truly aligned firing times, the worker itself
+ * (ReminderWorker) calculates the correct time to next slot and can reschedule
+ * itself as needed for precise cron-like behavior.
  */
 object ReminderScheduler {
 
@@ -41,6 +46,13 @@ object ReminderScheduler {
      * **Note:** WorkManager enforces a minimum interval of 15 minutes on Android.
      * If [intervalMinutes] is less than 15, it will be silently clamped to 15 minutes
      * by the OS, not by this code.
+     * 
+     * **Important Note on Timing:**
+     * While the initial delay is calculated to align with the next cron slot,
+     * WorkManager may not execute at the exact millisecond due to its internal
+     * batching and throttling. The worker will execute sometime around the scheduled
+     * time, but for production-grade cron-like precision, the worker itself should
+     * verify and reschedule if needed.
      */
     fun schedule(context: Context, intervalMinutes: Long) {
         val actualInterval = intervalMinutes.coerceAtLeast(15)

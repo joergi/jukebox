@@ -38,12 +38,20 @@ actual object NotificationService {
         center.addNotificationRequest(request) { _ -> }
     }
 
-    actual suspend fun showRandomRecordNotification(artist: String, title: String) {
+    actual suspend fun showRandomRecordNotification(
+        artist: String, 
+        title: String, 
+        thumbnailUrl: String?,
+        instanceId: Int?
+    ) {
         val center = UNUserNotificationCenter.currentNotificationCenter()
         val content = UNMutableNotificationContent()
         content.setTitle("Jukebox Reminder")
         content.setBody("You have to play now this record: $artist \u2014 $title")
         content.setSound(UNNotificationSound.defaultSound)
+        // TODO: iOS notifications can support images via UNNotificationAttachment
+        // but it requires downloading to a file URL first - implement in future
+        // instanceId parameter is unused on iOS (no click handling implemented yet)
 
         val trigger = UNTimeIntervalNotificationTrigger.triggerWithTimeInterval(1.0, repeats = false)
         val request = UNNotificationRequest.requestWithIdentifier(
@@ -68,15 +76,16 @@ actual object NotificationService {
      */
     actual fun scheduleRandomReminder(
         intervalMinutes: Long,
-        getRandomItem: () -> Pair<String, String>?,
+        getRandomItem: () -> Quadruple<String, String, String?, Int>?,
     ) {
         cancelRandomReminder()
 
         val item = getRandomItem() ?: return
+        val (artist, title, _, _) = item  // thumbnailUrl and instanceId not used for now
         val center = UNUserNotificationCenter.currentNotificationCenter()
         val content = UNMutableNotificationContent()
         content.setTitle("Jukebox Reminder")
-        content.setBody("You have to play now this record: ${item.first} \u2014 ${item.second}")
+        content.setBody("You have to play now this record: $artist \u2014 $title")
         content.setSound(UNNotificationSound.defaultSound)
 
         val intervalSeconds = (intervalMinutes * 60L).toDouble()

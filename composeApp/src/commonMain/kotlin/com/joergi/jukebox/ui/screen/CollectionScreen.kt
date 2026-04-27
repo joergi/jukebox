@@ -86,6 +86,7 @@ import com.joergi.jukebox.model.CollectionItem
 import com.joergi.jukebox.model.CollectionSyncMetadata
 import com.joergi.jukebox.model.SyncState
 import com.joergi.jukebox.model.formatSyncTime
+import com.joergi.jukebox.util.TimeProvider
 import com.joergi.jukebox.viewmodel.CollectionUiState
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.LetterFilter
@@ -219,7 +220,7 @@ fun CollectionScreen(
                     
                     LaunchedEffect(uiState.notificationIntervalMinutes) {
                         while (true) {
-                            val now = System.currentTimeMillis()
+                            val now = TimeProvider.currentTimeMillis()
                             val totalMinutes = now / 60_000L
                             val intervalMinutes = uiState.notificationIntervalMinutes
                             val nextSlot = ((totalMinutes / intervalMinutes) + 1) * intervalMinutes

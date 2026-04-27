@@ -14,7 +14,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -23,26 +22,22 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.joergi.jukebox.updateGlobalDarkMode
 import com.joergi.jukebox.viewmodel.CollectionViewModel
+import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: CollectionViewModel,
+    authViewModel: DiscogsAuthViewModel,
     onNavigateBack: () -> Unit,
+    onDisconnect: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-
-    var intervalText by remember(uiState.notificationIntervalMinutes) {
-        mutableStateOf(uiState.notificationIntervalMinutes.toString())
-    }
 
     Scaffold(
         topBar = {
@@ -66,38 +61,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item {
-                Text(
-                    text = "Random reminder interval",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = intervalText,
-                        onValueChange = { text ->
-                            intervalText = text
-                            text.toLongOrNull()?.let { minutes ->
-                                if (minutes > 0) viewModel.setNotificationIntervalMinutes(minutes)
-                            }
-                        },
-                        label = { Text("Minutes") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                    )
-                }
-
-                Text(
-                    text = "A random record from your collection will be highlighted every $intervalText minute(s).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
             item {
                 // Dark mode toggle
                 Row(
@@ -125,6 +88,56 @@ fun SettingsScreen(
                             updateGlobalDarkMode(it)
                         },
                     )
+                }
+            }
+
+            item {
+                // Start on boot toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Start on device boot",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = if (uiState.startOnBoot) "Reminders will start automatically when device boots" 
+                                  else "Manual start required after device boot",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = uiState.startOnBoot,
+                        onCheckedChange = { viewModel.setStartOnBoot(it) },
+                    )
+                }
+            }
+
+            item {
+                // Disconnect account button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    TextButton(
+                        onClick = {
+                            authViewModel.disconnect()
+                            onDisconnect()
+                        }
+                    ) {
+                        Text(
+                            text = "Disconnect from Discogs",
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
 

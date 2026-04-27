@@ -17,8 +17,15 @@ expect object NotificationService {
      * Message: "You have to play now this record: [artist] — [title]"
      * @param artist Artist name(s)
      * @param title  Album/record title
+     * @param thumbnailUrl Optional URL to the album cover image
+     * @param instanceId The Discogs instance ID of the record for proper identification
      */
-    suspend fun showRandomRecordNotification(artist: String, title: String)
+    suspend fun showRandomRecordNotification(
+        artist: String, 
+        title: String, 
+        thumbnailUrl: String? = null,
+        instanceId: Int? = null
+    )
 
     /**
      * Schedules a repeating random-record reminder at the given interval.
@@ -28,11 +35,12 @@ expect object NotificationService {
      * On iOS: uses UNTimeIntervalNotificationTrigger (repeating).
      * @param intervalMinutes How often to remind the user (in minutes)
      * @param getRandomItem   Supplier called each time to obtain the item to show;
-     *                        returns null if the collection is empty
+     *                        returns null if the collection is empty.
+     *                        Returns (artist, title, thumbnailUrl, instanceId)
      */
     fun scheduleRandomReminder(
         intervalMinutes: Long,
-        getRandomItem: () -> Pair<String, String>?,
+        getRandomItem: () -> Quadruple<String, String, String?, Int>?,
     )
 
     /**
@@ -40,3 +48,11 @@ expect object NotificationService {
      */
     fun cancelRandomReminder()
 }
+
+/** Helper data class for 4-tuple return values */
+data class Quadruple<out A, out B, out C, out D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
+)

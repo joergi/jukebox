@@ -13,6 +13,7 @@ import com.joergi.jukebox.storage.StorageKeys
 import com.joergi.jukebox.util.Logger
 import com.joergi.jukebox.util.TimeProvider
 import com.joergi.jukebox.util.isAndroidPlatform
+import com.joergi.jukebox.util.setReminderUsername
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +62,8 @@ data class CollectionUiState(
     val notificationIntervalMinutes: Long = DEFAULT_NOTIFICATION_INTERVAL_MINUTES,
      /** Dark mode enabled. Default true. */
      val isDarkMode: Boolean = true,
+     /** Start reminders automatically on device boot. Default false. */
+     val startOnBoot: Boolean = false,
      /** History of randomly selected records. */
      val selectedRecordsHistory: List<CollectionItem> = emptyList(),
 ) {
@@ -136,6 +139,7 @@ class CollectionViewModel(
     private var syncTimer: Job? = null
      private var reminderJob: Job? = null
      private companion object {
+         private const val TAG = "CollectionViewModel"
          private const val SYNC_INTERVAL_MS = 60 * 60 * 1000L  // 1 hour
      }
 
@@ -146,6 +150,7 @@ class CollectionViewModel(
              
              loadAndApplyNotificationInterval()
              loadAndApplyDarkMode()
+             loadAndApplyStartOnBoot()
              loadAndApplySelectedRecordsHistory()
              loadAndApplyHighlightedItem()
              
@@ -620,7 +625,7 @@ class CollectionViewModel(
      * If no exact match found, tries partial match on title.
      * Works on the complete local collection (no sync needed).
      */
-    fun searchAndHighlightAlbum(artist: String, title: String) {
+    fun searchAndHighlightAlbum(artist: String, title: String, shouldPersist: Boolean = false) {
         viewModelScope.launch {
             val items = _uiState.value.items
             if (items.isEmpty()) return@launch
@@ -640,7 +645,10 @@ class CollectionViewModel(
                         scrollToIndex = if (index >= 0) index else null,
                     )
                 }
-                persistHighlightedItem(exactMatch)
+                // Only persist if explicitly requested
+                if (shouldPersist) {
+                    persistHighlightedItem(exactMatch)
+                }
                 return@launch
             }
             
@@ -658,7 +666,55 @@ class CollectionViewModel(
                         scrollToIndex = if (index >= 0) index else null,
                     )
                 }
-                persistHighlightedItem(partialMatch)
+                // Only persist if explicitly requested
+                if (shouldPersist) {
+                    persistHighlightedItem(partialMatch)
+                }
+            }
+        }
+    }
+
+    /**
+     * Highlights an album by its Discogs instance ID (from notification click).
+     * This provides exact identification of the record that was randomly selected.
+     * Works on the complete local collection (no sync needed).
+     */
+    fun highlightByInstanceId(instanceId: Int, shouldPersist: Boolean = false) {
+        Logger.d(TAG, "highlightByInstanceId() called with instanceId=$instanceId, shouldPersist=$shouldPersist")
+        viewModelScope.launch {
+            val items = _uiState.value.items
+            Logger.d(TAG, "Current items count: ${items.size}")
+            
+            if (items.isEmpty()) {
+                Logger.w(TAG, "Items list is empty - cannot highlight instanceId=$instanceId")
+                return@launch
+            }
+            
+            Logger.d(TAG, "Searching for item with instanceId=$instanceId in ${items.size} items")
+            val matchedItem = items.firstOrNull { item ->
+                val matches = item.instanceId == instanceId
+                if (matches) {
+                    Logger.d(TAG, "FOUND MATCH: item.instanceId=${item.instanceId}, item.title='${item.title}', item.artists=${item.artists}")
+                }
+                matches
+            }
+            
+            if (matchedItem != null) {
+                val index = items.indexOf(matchedItem)
+                Logger.d(TAG, "Matched item found at index=$index, updating UI state to highlight it")
+                _uiState.update {
+                    it.copy(
+                        selectedFilter = null,
+                        highlightedItem = matchedItem,
+                        scrollToIndex = if (index >= 0) index else null,
+                    )
+                }
+                // Only persist if this is NOT from a notification click
+                if (shouldPersist) {
+                    persistHighlightedItem(matchedItem)
+                }
+            } else {
+                Logger.w(TAG, "NO MATCH FOUND for instanceId=$instanceId. Available instanceIds in first 10 items: ${items.take(10).map { it.instanceId }}")
             }
         }
     }
@@ -695,7 +751,7 @@ class CollectionViewModel(
        * For example, with interval=15 and current time 14:32:45, returns ms until 14:45:00.
        */
       private fun getMillisUntilNextSlot(intervalMinutes: Long): Long {
-          val now = System.currentTimeMillis()
+          val now = TimeProvider.currentTimeMillis()
           val totalMinutes = now / 60_000L
           val nextSlot = ((totalMinutes / intervalMinutes) + 1) * intervalMinutes
           val nextSlotMs = nextSlot * 60_000L
@@ -708,12 +764,15 @@ class CollectionViewModel(
           if (isAndroidPlatform()) {
               // On Android: Use WorkManager only (background-safe)
               // No in-app coroutine loop to avoid duplicate schedulers
+              // Store username in ReminderItemProvider for history tracking
+              setReminderUsername(username)
+              
               NotificationService.scheduleRandomReminder(intervalMinutes) {
                   val items = _uiState.value.items
                   if (items.isEmpty()) null else {
                       val picked = items.random()
                       val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                      artist to picked.title
+                      com.joergi.jukebox.service.Quadruple(artist, picked.title, picked.thumb, picked.instanceId)
                   }
               }
           } else {
@@ -732,7 +791,7 @@ class CollectionViewModel(
                       val picked = _uiState.value.highlightedItem
                       if (picked != null) {
                           val artist = picked.artists.joinToString(", ").ifBlank { "Unknown Artist" }
-                          NotificationService.showRandomRecordNotification(artist, picked.title)
+                          NotificationService.showRandomRecordNotification(artist, picked.title, picked.thumb, picked.instanceId)
                       }
                   }
               }
@@ -767,6 +826,18 @@ class CollectionViewModel(
         viewModelScope.launch {
             storage?.write(StorageKeys.DARK_MODE, isDark.toString())
             _uiState.update { it.copy(isDarkMode = isDark) }
+        }
+    }
+
+    private suspend fun loadAndApplyStartOnBoot() {
+        val saved = storage?.read(StorageKeys.START_ON_BOOT)?.toBoolean() ?: false
+        _uiState.update { it.copy(startOnBoot = saved) }
+    }
+
+    fun setStartOnBoot(enabled: Boolean) {
+        viewModelScope.launch {
+            storage?.write(StorageKeys.START_ON_BOOT, enabled.toString())
+            _uiState.update { it.copy(startOnBoot = enabled) }
         }
     }
 
@@ -812,7 +883,8 @@ class CollectionViewModel(
         viewModelScope.launch {
             try {
                 storage?.delete(StorageKeys.selectedRecordsHistory(username))
-                _uiState.update { it.copy(selectedRecordsHistory = emptyList()) }
+                storage?.delete(StorageKeys.currentHighlightedItem(username))
+                _uiState.update { it.copy(selectedRecordsHistory = emptyList(), highlightedItem = null, scrollToIndex = null) }
             } catch (e: Exception) {
                 log("SelectedRecordsHistory", "Failed to clear history: ${e.message}", e)
             }

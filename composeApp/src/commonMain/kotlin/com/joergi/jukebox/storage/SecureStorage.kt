@@ -65,6 +65,8 @@ object StorageKeys {
     const val RANDOM_NOTIFICATION_INTERVAL_MINUTES = "random_notification_interval_minutes"
     /** Dark mode preference. Default: false (light mode). */
     const val DARK_MODE = "dark_mode"
+    /** Start reminders automatically on device boot. Default: false. */
+    const val START_ON_BOOT = "start_on_boot"
     /** Seconds remaining on the current reminder countdown timer. */
     const val REMINDER_COUNTDOWN_SECONDS = "reminder_countdown_seconds"
     fun collectionCache(username: String) = "collection_cache_$username"

@@ -38,16 +38,24 @@ actual object NotificationService {
         )
     }
 
-    actual suspend fun showRandomRecordNotification(artist: String, title: String) {
+    actual suspend fun showRandomRecordNotification(
+        artist: String, 
+        title: String, 
+        thumbnailUrl: String?,
+        instanceId: Int?
+    ) {
         notifySend(
             "Jukebox Reminder",
             "Time to play: $artist \u2014 $title",
         )
+        // TODO: Desktop notifications don't support images via notify-send easily
+        // Consider using a custom notification library in the future
+        // instanceId parameter is unused on Desktop (no click handling)
     }
 
     actual fun scheduleRandomReminder(
         intervalMinutes: Long,
-        getRandomItem: () -> Pair<String, String>?,
+        getRandomItem: () -> Quadruple<String, String, String?, Int>?,
     ) {
         // Scheduling is handled by the ViewModel coroutine loop.
         // This expect/actual stub is retained for API compatibility.

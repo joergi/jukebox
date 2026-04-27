@@ -3,8 +3,8 @@ package com.joergi.jukebox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -17,6 +17,7 @@ import com.joergi.jukebox.ui.screen.CollectionScreen
 import com.joergi.jukebox.ui.screen.HomeScreen
 import com.joergi.jukebox.ui.screen.SettingsScreen
 import com.joergi.jukebox.ui.theme.JukeboxTheme
+import com.joergi.jukebox.util.Logger
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
 import com.joergi.jukebox.viewmodel.AuthState
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 
 // ── Typed navigation destinations ─────────────────────────────────────────────
+
+private const val TAG = "App"
 
 @Serializable
 internal data object HomeRoute
@@ -53,8 +56,11 @@ fun App(
     openUrl: suspend (String) -> Unit,
     notificationArtist: String? = null,
     notificationTitle: String? = null,
+    notificationInstanceId: Int? = null,
     isFromNotification: Boolean = false,
 ) {
+    Logger.d(TAG, "App() composable called - isFromNotification=$isFromNotification, notificationInstanceId=$notificationInstanceId, notificationArtist='$notificationArtist', notificationTitle='$notificationTitle'")
+    
     val isDarkMode by globalDarkModeState.collectAsState()
     
     // Load dark mode preference from storage on first app load
@@ -80,11 +86,23 @@ fun App(
         // Watch auth state to determine navigation
         val authState by authViewModel.state.collectAsState()
 
+        // Auto-navigate to collection if user is already authenticated (skip HomeScreen)
+        LaunchedEffect(authState) {
+            if (authState is AuthState.Authenticated) {
+                val username = (authState as AuthState.Authenticated).username
+                // Navigate to collection, clearing the back stack so user can't go back to HomeScreen
+                navController.navigate(CollectionRoute(username)) {
+                    popUpTo(HomeRoute) { inclusive = true }
+                }
+            }
+        }
+
         // If opened from notification and user is authenticated, navigate directly to collection
         LaunchedEffect(isFromNotification, authState) {
             if (isFromNotification && authState is AuthState.Authenticated) {
                 val username = (authState as AuthState.Authenticated).username
-                if (!notificationArtist.isNullOrEmpty() && !notificationTitle.isNullOrEmpty()) {
+                if (notificationInstanceId != null || 
+                    (!notificationArtist.isNullOrEmpty() && !notificationTitle.isNullOrEmpty())) {
                     // Navigate to collection with the notification data
                     navController.navigate(CollectionRoute(username))
                 }
@@ -111,11 +129,24 @@ fun App(
                         storage = storage,
                     )
                 }
+                
+                val uiState by collectionViewModel.uiState.collectAsState()
 
-                // If opened from notification, search for and highlight the album
-                LaunchedEffect(isFromNotification, notificationArtist, notificationTitle) {
-                    if (isFromNotification && !notificationArtist.isNullOrEmpty() && !notificationTitle.isNullOrEmpty()) {
-                        collectionViewModel.searchAndHighlightAlbum(notificationArtist, notificationTitle)
+                // If opened from notification, highlight the album ONLY after collection is loaded
+                LaunchedEffect(isFromNotification, notificationInstanceId, notificationArtist, notificationTitle, uiState.items.size) {
+                    if (isFromNotification && uiState.items.isNotEmpty()) {
+                        Logger.d(TAG, "Collection loaded with ${uiState.items.size} items, processing notification")
+                        if (notificationInstanceId != null) {
+                            // Prefer highlighting by instanceId for exact match
+                            Logger.d(TAG, "Calling highlightByInstanceId($notificationInstanceId) with shouldPersist=true")
+                            collectionViewModel.highlightByInstanceId(notificationInstanceId, shouldPersist = true)
+                        } else if (!notificationArtist.isNullOrEmpty() && !notificationTitle.isNullOrEmpty()) {
+                            // Fallback to artist/title search (less precise)
+                            Logger.d(TAG, "Calling searchAndHighlightAlbum(artist='$notificationArtist', title='$notificationTitle') with shouldPersist=true")
+                            collectionViewModel.searchAndHighlightAlbum(notificationArtist, notificationTitle, shouldPersist = true)
+                        } else {
+                            Logger.w(TAG, "isFromNotification=true but no valid notification data provided")
+                        }
                     }
                 }
 
@@ -143,7 +174,14 @@ fun App(
 
                 SettingsScreen(
                     viewModel = collectionViewModel,
+                    authViewModel = authViewModel,
                     onNavigateBack = { navController.popBackStack() },
+                    onDisconnect = {
+                        // Navigate back to HomeScreen after disconnect
+                        navController.navigate(HomeRoute) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    },
                 )
             }
         }
