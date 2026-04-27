@@ -39,6 +39,25 @@ Run locally:
 ./gradlew :composeApp:run
 ```
 
+### Android Emulator
+
+First, start an Android emulator. Via command line:
+
+List available emulators:
+```bash
+emulator -list-avds
+```
+
+Start an emulator:
+```bash
+emulator -avd <emulator_name>
+```
+
+Then run:
+```bash
+./gradlew :composeApp:installDebug
+```
+
 Build a distributable (`.deb`, `.msi`, `.dmg`):
 ```
 ./gradlew :composeApp:createDistributable
