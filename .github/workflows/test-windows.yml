@@ -1,33 +1,33 @@
-#name: Windows Tests
-#
-#on:
-#  pull_request:
-#    branches:
-#      - main
-#  workflow_dispatch: {}
-#
-#jobs:
-#  # ── 1. Path filter ──────────────────────────────────────────────────────────
-#  check-if-windows-should-run:
-#    runs-on: ubuntu-latest
-#    permissions:
-#      contents: read
-#      pull-requests: read
-#    outputs:
-#      should_run: ${{ steps.watched_paths.outputs.src }}
-#    steps:
-#      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-#      - id: watched_paths
-#        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-#        with:
-#          filters: |
-#            src:
-#              - 'composeApp/src/**'
-#              - 'composeApp/build.gradle.kts'
-#              - 'gradle/libs.versions.toml'
-#              - 'build.gradle.kts'
-#              - 'settings.gradle.kts'
-#              - '.github/workflows/test-windows.yml'
+name: Windows Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  # ── 1. Path filter ──────────────────────────────────────────────────────────
+  check-if-windows-should-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should_run: ${{ steps.watched_paths.outputs.src }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: watched_paths
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            src:
+              - 'composeApp/src/**'
+              - 'composeApp/build.gradle.kts'
+              - 'gradle/libs.versions.toml'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - '.github/workflows/test-windows.yml'
 #
 #  # ── 2. Unit tests — pure JVM, no display needed ────────────────────────────
 #  unit-tests-windows:

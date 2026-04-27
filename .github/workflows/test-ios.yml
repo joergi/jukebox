@@ -1,34 +1,34 @@
-#name: iOS Tests
-#
-#on:
-#  pull_request:
-#    branches:
-#      - main
-#  workflow_dispatch: {}
-#
-#jobs:
-#  # ── 1. Path filter ──────────────────────────────────────────────────────────
-#  check-if-ios-should-run:
-#    runs-on: ubuntu-latest
-#    permissions:
-#      contents: read
-#      pull-requests: read
-#    outputs:
-#      should_run: ${{ steps.watched_paths.outputs.src }}
-#    steps:
-#      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-#      - id: watched_paths
-#        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-#        with:
-#          filters: |
-#            src:
-#              - 'composeApp/src/**'
-#              - 'composeApp/build.gradle.kts'
-#              - 'gradle/libs.versions.toml'
-#              - 'build.gradle.kts'
-#              - 'settings.gradle.kts'
-#              - '.github/workflows/test-ios.yml'
-#
+name: iOS Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  # ── 1. Path filter ──────────────────────────────────────────────────────────
+  check-if-ios-should-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should_run: ${{ steps.watched_paths.outputs.src }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: watched_paths
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            src:
+              - 'composeApp/src/**'
+              - 'composeApp/build.gradle.kts'
+              - 'gradle/libs.versions.toml'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - '.github/workflows/test-ios.yml'
+
 #  # ── 2. Unit tests — Kotlin/Native compiled for iOS simulator, no device ────
 #  # Runs commonTest + iosMain code through the Kotlin/Native test runner.
 #  # No physical device or simulator boot required; Gradle handles execution.
