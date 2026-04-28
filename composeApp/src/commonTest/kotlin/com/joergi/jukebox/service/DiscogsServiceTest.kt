@@ -194,7 +194,7 @@ class DiscogsServiceTest {
                           "basic_information": {
                             "title": "Nevermind",
                             "artists": [{"name": "Nirvana"}],
-                            "formats": [{"name": "Vinyl"}],
+                            "formats": [{"name": "Vinyl", "descriptions": []}],
                             "thumb": "https://img.discogs.com/nvm.jpg",
                             "year": 1991,
                             "labels": [{"name": "DGC"}]
@@ -252,6 +252,122 @@ class DiscogsServiceTest {
         assertFailsWith<DiscogsException> {
             service.getCollection("testuser")
         }
+    }
+
+    // ── getCollection with format descriptions ────────────────────────────────
+
+    @Test
+    fun `getCollection displays format descriptions when available`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                content = """
+                    {
+                      "pagination": {"pages": 1, "items": 1},
+                      "releases": [
+                        {
+                          "instance_id": 1,
+                          "id": 10,
+                          "basic_information": {
+                            "title": "Abbey Road",
+                            "artists": [{"name": "The Beatles"}],
+                            "formats": [{"name": "Vinyl", "descriptions": ["LP", "Album"]}],
+                            "thumb": "https://img.discogs.com/abbey.jpg",
+                            "year": 1969,
+                            "labels": [{"name": "Apple"}]
+                          }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = jsonHeaders(),
+            )
+        }
+
+        val service = makeService(engine)
+        service.setCredentials("tok", "sec")
+
+        val result = service.getCollection("testuser", page = 1)
+
+        result.items.size shouldBe 1
+        result.items.first().formats.first() shouldBe "Vinyl (LP, Album)"
+    }
+
+    @Test
+    fun `getCollection handles null format descriptions gracefully`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                content = """
+                    {
+                      "pagination": {"pages": 1, "items": 1},
+                      "releases": [
+                        {
+                          "instance_id": 1,
+                          "id": 10,
+                          "basic_information": {
+                            "title": "Dark Side",
+                            "artists": [{"name": "Pink Floyd"}],
+                            "formats": [{"name": "Vinyl", "descriptions": null}],
+                            "thumb": "https://img.discogs.com/dark.jpg",
+                            "year": 1973,
+                            "labels": [{"name": "Harvest"}]
+                          }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = jsonHeaders(),
+            )
+        }
+
+        val service = makeService(engine)
+        service.setCredentials("tok", "sec")
+
+        val result = service.getCollection("testuser", page = 1)
+
+        result.items.size shouldBe 1
+        result.items.first().formats.first() shouldBe "Vinyl"
+    }
+
+    @Test
+    fun `getCollection handles unescaped special characters in record titles with lenient JSON parsing`() = runTest {
+        // This JSON has an unescaped apostrophe in "Rock'n'Roll Genossen"
+        // Standard JSON parsing would fail here, but lenient mode should handle it
+        val engine = MockEngine { _ ->
+            respond(
+                content = """
+                    {
+                      "pagination": {"pages": 1, "items": 1},
+                      "releases": [
+                        {
+                          "instance_id": 1,
+                          "id": 123,
+                          "basic_information": {
+                            "title": "Rock'n'Roll Genossen",
+                            "artists": [{"name": "Various"}],
+                            "formats": [{"name": "Vinyl", "descriptions": ["LP"]}],
+                            "thumb": "https://img.discogs.com/rock.jpg",
+                            "year": 1970,
+                            "labels": [{"name": "Krautrock"}]
+                          }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = jsonHeaders(),
+            )
+        }
+
+        val service = makeService(engine)
+        service.setCredentials("tok", "sec")
+
+        val result = service.getCollection("testuser", page = 1)
+
+        result.items.size shouldBe 1
+        result.items.first().title shouldBe "Rock'n'Roll Genossen"
+        result.items.first().formats.first() shouldBe "Vinyl (LP)"
     }
 
     // ── clearCredentials ──────────────────────────────────────────────────────

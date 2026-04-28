@@ -30,7 +30,13 @@ data class CollectionItem(
                 id = json.id,
                 title = info.title,
                 artists = info.artists.map { it.name },
-                formats = info.formats.map { it.name },
+                formats = info.formats.map { format ->
+                    if (!format.descriptions.isNullOrEmpty()) {
+                        "${format.name} (${format.descriptions.joinToString(", ")})"
+                    } else {
+                        format.name
+                    }
+                },
                 thumb = info.thumb?.ifBlank { null },
                 year = info.year?.takeIf { it != 0 },
                 label = info.labels?.firstOrNull()?.name,
@@ -62,7 +68,10 @@ data class DiscogsBasicInfoJson(
 data class DiscogsArtistJson(val name: String)
 
 @Serializable
-data class DiscogsFormatJson(val name: String)
+data class DiscogsFormatJson(
+    val name: String,
+    val descriptions: List<String>? = null
+)
 
 @Serializable
 data class DiscogsLabelJson(val name: String)

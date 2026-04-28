@@ -17,6 +17,7 @@ val localProps = Properties().also { props ->
 }
 val discogsConsumerKey: String = localProps.getProperty("discogs.consumerKey", "")
 val discogsConsumerSecret: String = localProps.getProperty("discogs.consumerSecret", "")
+val discogsPersonalAccessToken: String = localProps.getProperty("discogs.personalaccesstoken", "")
 
 kotlin {
     // Use the same JDK version as .sdkmanrc (Java 25 / Liberica)
@@ -127,6 +128,7 @@ kotlin {
                 implementation(libs.turbine)                 // StateFlow testing
                 implementation(libs.ktor.client.mock)        // MockEngine
                 implementation(libs.kotlinx.coroutines.test) // runTest
+                implementation(libs.ktor.client.okhttp)      // OkHttp engine (same as Android)
             }
         }
 
@@ -140,6 +142,10 @@ kotlin {
                 implementation("androidx.test:runner:1.7.0")
                 implementation("androidx.work:work-testing:2.11.2")
                 implementation(libs.androidx.work.runtime)
+                implementation(libs.ktor.client.okhttp)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.serialization.kotlinx.json)
+                implementation(libs.kotlinx.coroutines.android)
             }
         }
     }
@@ -159,6 +165,8 @@ android {
         // Inject credentials into BuildConfig so they are never in source
         buildConfigField("String", "DISCOGS_CONSUMER_KEY", "\"$discogsConsumerKey\"")
         buildConfigField("String", "DISCOGS_CONSUMER_SECRET", "\"$discogsConsumerSecret\"")
+        buildConfigField("String", "DISCOGS_PERSONAL_ACCESS_TOKEN", "\"$discogsPersonalAccessToken\"")
+        buildConfigField("String", "DISCOGS_USERNAME", "\"schenkelklopfer\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -200,5 +208,7 @@ afterEvaluate {
     // Configure desktop tests to run sequentially due to Kotlin 2.3.21 test flakiness
     tasks.named<Test>("desktopTest") {
         maxParallelForks = 1
+        // Pass Discogs personal access token so real-API tests can authenticate
+        systemProperty("discogs.token", discogsPersonalAccessToken)
     }
 }

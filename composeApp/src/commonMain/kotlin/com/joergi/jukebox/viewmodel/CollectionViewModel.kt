@@ -228,26 +228,38 @@ class CollectionViewModel(
          _uiState.update { it.copy(syncProgress = 0f) }
 
          while (page <= totalPages) {
-             runCatching {
-                 service.getCollection(username = username, page = page, perPage = perPage)
-             }.onSuccess { result ->
-                 totalPages = result.totalPages
-                 allItems += result.items
+              runCatching {
+                  service.getCollection(username = username, page = page, perPage = perPage)
+              }.onSuccess { result ->
+                  totalPages = result.totalPages
+                  allItems += result.items
 
-                 val progress = page.toFloat() / totalPages.toFloat()
-                 _uiState.update { state ->
-                     state.copy(
-                         items = allItems.toList(),
-                         currentPage = page,
-                         totalPages = totalPages,
-                         totalItems = result.totalItems,
-                         isLoading = false,
-                         error = null,
-                         syncProgress = if (page < totalPages) progress else null,
-                     )
-                 }
-                 page++
-             }.onFailure { e ->
+                  // Log skipped records if any
+                  if (result.skippedRecords > 0) {
+                      println("SKIPPED RECORDS: ${result.skippedRecords} records failed to deserialize")
+                      result.skippedRecordDetails.forEach { skipped ->
+                          println("  - ID ${skipped.id}: ${skipped.title} (${skipped.error})")
+                      }
+                  }
+
+                  val progress = page.toFloat() / totalPages.toFloat()
+                  _uiState.update { state ->
+                      state.copy(
+                          items = allItems.toList(),
+                          currentPage = page,
+                          totalPages = totalPages,
+                          totalItems = result.totalItems,
+                          isLoading = false,
+                          error = if (result.skippedRecords > 0) {
+                              "Synced ${result.items.size} records. ${result.skippedRecords} records skipped due to format errors."
+                          } else {
+                              null
+                          },
+                          syncProgress = if (page < totalPages) progress else null,
+                      )
+                  }
+                  page++
+              }.onFailure { e ->
                  _uiState.update {
                      it.copy(
                          isLoading = false,

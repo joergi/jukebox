@@ -215,9 +215,9 @@ class CollectionViewModelTest {
             respond(
                 """
                 {"pagination":{"pages":1,"items":3},"releases":[
-                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl"}]}},
-                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl"}]}},
-                  {"instance_id":3,"id":3,"basic_information":{"title":"B2","artists":[{"name":"Bravo"}],"formats":[{"name":"Vinyl"}]}}
+                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                  {"instance_id":3,"id":3,"basic_information":{"title":"B2","artists":[{"name":"Bravo"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                 ]}
                 """.trimIndent(),
                 HttpStatusCode.OK,
@@ -284,14 +284,14 @@ class CollectionViewModelTest {
             val json = when (callCount) {
                 1 -> """
                     {"pagination":{"pages":2,"items":4},"releases":[
-                      {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"X"}],"formats":[{"name":"Vinyl"}]}},
-                      {"instance_id":2,"id":2,"basic_information":{"title":"A2","artists":[{"name":"X"}],"formats":[{"name":"Vinyl"}]}}
+                      {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"X"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                      {"instance_id":2,"id":2,"basic_information":{"title":"A2","artists":[{"name":"X"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                     ]}
                 """.trimIndent()
                 else -> """
                     {"pagination":{"pages":2,"items":4},"releases":[
-                      {"instance_id":3,"id":3,"basic_information":{"title":"B1","artists":[{"name":"X"}],"formats":[{"name":"Vinyl"}]}},
-                      {"instance_id":4,"id":4,"basic_information":{"title":"B2","artists":[{"name":"X"}],"formats":[{"name":"Vinyl"}]}}
+                      {"instance_id":3,"id":3,"basic_information":{"title":"B1","artists":[{"name":"X"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                      {"instance_id":4,"id":4,"basic_information":{"title":"B2","artists":[{"name":"X"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                     ]}
                 """.trimIndent()
             }
@@ -405,8 +405,8 @@ class CollectionViewModelTest {
             respond(
                 """
                 {"pagination":{"pages":1,"items":2},"releases":[
-                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl"}]}},
-                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl"}]}}
+                  {"instance_id":1,"id":1,"basic_information":{"title":"A1","artists":[{"name":"Alpha"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"B1","artists":[{"name":"Beta"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                 ]}
                 """.trimIndent(),
                 HttpStatusCode.OK,
@@ -566,8 +566,8 @@ class CollectionViewModelTest {
             respond(
                 """
                 {"pagination":{"pages":1,"items":2},"releases":[
-                  {"instance_id":1,"id":1,"basic_information":{"title":"Dark Side","artists":[{"name":"Pink Floyd"}],"formats":[{"name":"Vinyl"}]}},
-                  {"instance_id":2,"id":2,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Dark Side","artists":[{"name":"Pink Floyd"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                 ]}
                 """.trimIndent(),
                 HttpStatusCode.OK,
@@ -596,7 +596,7 @@ class CollectionViewModelTest {
             respond(
                 """
                 {"pagination":{"pages":1,"items":1},"releases":[
-                  {"instance_id":1,"id":1,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Abbey Road","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                 ]}
                 """.trimIndent(),
                 HttpStatusCode.OK,
@@ -625,8 +625,8 @@ class CollectionViewModelTest {
             respond(
                 """
                 {"pagination":{"pages":1,"items":2},"releases":[
-                  {"instance_id":1,"id":1,"basic_information":{"title":"Album A","artists":[{"name":"Artist A"}],"formats":[{"name":"Vinyl"}]}},
-                  {"instance_id":2,"id":2,"basic_information":{"title":"Beatles Album","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl"}]}}
+                  {"instance_id":1,"id":1,"basic_information":{"title":"Album A","artists":[{"name":"Artist A"}],"formats":[{"name":"Vinyl","descriptions":[]}]}},
+                  {"instance_id":2,"id":2,"basic_information":{"title":"Beatles Album","artists":[{"name":"The Beatles"}],"formats":[{"name":"Vinyl","descriptions":[]}]}}
                 ]}
                 """.trimIndent(),
                 HttpStatusCode.OK,

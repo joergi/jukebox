@@ -28,8 +28,8 @@ class CollectionItemTest {
                 title = "OK Computer",
                 artists = listOf(DiscogsArtistJson("Radiohead")),
                 formats = listOf(
-                    DiscogsFormatJson("Vinyl"),
-                    DiscogsFormatJson("Box Set")
+                    DiscogsFormatJson("Vinyl", listOf("LP", "Album")),
+                    DiscogsFormatJson("Box Set", emptyList())
                 ),
                 thumb = "https://example.com/thumb.jpg",
                 year = 1997,
@@ -43,7 +43,7 @@ class CollectionItemTest {
         item.id shouldBe 7
         item.title shouldBe "OK Computer"
         item.artists shouldContainExactly listOf("Radiohead")
-        item.formats shouldContainExactly listOf("Vinyl", "Box Set")
+        item.formats shouldContainExactly listOf("Vinyl (LP, Album)", "Box Set")
         item.thumb shouldBe "https://example.com/thumb.jpg"
         item.year shouldBe 1997
         item.label shouldBe "Parlophone"
@@ -115,7 +115,7 @@ class CollectionItemTest {
                   "basic_information": {
                     "title": "The Dark Side of the Moon",
                     "artists": [{ "name": "Pink Floyd" }],
-                    "formats": [{ "name": "Vinyl" }],
+                    "formats": [{ "name": "Vinyl", "descriptions": ["LP", "Album"] }],
                     "thumb": "https://img.discogs.com/dsotm.jpg",
                     "year": 1973,
                     "labels": [{ "name": "Harvest" }]
@@ -173,7 +173,7 @@ class CollectionItemTest {
         id: Int = 1,
         title: String = "Test Album",
         artists: List<DiscogsArtistJson> = listOf(DiscogsArtistJson("Artist")),
-        formats: List<DiscogsFormatJson> = listOf(DiscogsFormatJson("Vinyl")),
+        formats: List<DiscogsFormatJson> = listOf(DiscogsFormatJson("Vinyl", emptyList())),
         thumb: String? = "https://example.com/img.jpg",
         year: Int? = 2000,
         labels: List<DiscogsLabelJson>? = listOf(DiscogsLabelJson("Label")),

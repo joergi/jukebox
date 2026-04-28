@@ -3,6 +3,7 @@ package com.joergi.jukebox.service
 import com.joergi.jukebox.model.CollectionItem
 import com.joergi.jukebox.model.DiscogsCollectionResponse
 import com.joergi.jukebox.model.DiscogsIdentityJson
+import com.joergi.jukebox.model.DiscogsReleaseJson
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -11,6 +12,7 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
+import kotlinx.serialization.json.Json
 
 /**
  * Low-level Discogs API wrapper using Ktor.
@@ -172,17 +174,14 @@ class DiscogsService(
                 "sort_order" to "asc",
             ),
         )
-        return CollectionResult(
-            items = data.releases.map { CollectionItem.fromJson(it) },
-            totalPages = data.pagination.pages,
-            totalItems = data.pagination.items,
-        )
+        return deserializeReleasesWithErrorHandling(data.releases, data.pagination.pages, data.pagination.items)
     }
 
     /**
      * Fetches the newest 50 records added to the collection.
      * Sorted by added DESC to get most recent first.
      * Used to detect new additions since last sync.
+     * Skips records that fail to deserialize.
      *
      * @param username The authenticated user's username
      * @param folderId The collection folder ID (0 = main collection)
@@ -202,13 +201,18 @@ class DiscogsService(
                 "page" to "1",
             ),
         )
-        return data.releases.map { CollectionItem.fromJson(it) }
+        return deserializeReleasesWithErrorHandling(
+            data.releases,
+            data.pagination.pages,
+            data.pagination.items
+        ).items
     }
 
     /**
      * Fetches ALL records in the collection, handling pagination.
      * Used during full resync when validation fails.
      * Sorts by artist ascending to maintain collection order.
+     * Skips records that fail to deserialize.
      *
      * @param username The authenticated user's username
      * @param folderId The collection folder ID (0 = main collection)
@@ -237,7 +241,12 @@ class DiscogsService(
                     "page" to "$page",
                 ),
             )
-            allRecords.addAll(data.releases.map { CollectionItem.fromJson(it) })
+            val result = deserializeReleasesWithErrorHandling(
+                data.releases,
+                data.pagination.pages,
+                data.pagination.items
+            )
+            allRecords.addAll(result.items)
 
             hasMore = page < data.pagination.pages
             page++
@@ -305,6 +314,14 @@ class DiscogsService(
             throw DiscogsException("Discogs API error ${response.status}: ${response.bodyAsText()}")
         }
 
+        // DEBUG: Log raw response for collection endpoints
+        if (path.contains("collection")) {
+            val rawBody = response.bodyAsText()
+            println("═══ DEBUG: Raw Discogs Collection Response ═══")
+            println(rawBody)
+            println("═══ END Debug Response ═══")
+        }
+
         return response.body()
     }
 
@@ -335,6 +352,54 @@ class DiscogsService(
             val idx = pair.indexOf('=')
             if (idx < 0) pair to "" else pair.substring(0, idx) to pair.substring(idx + 1)
         }
+
+    /**
+     * Deserializes a list of Discogs release JSON objects into CollectionItem objects.
+     * Handles errors gracefully by skipping records that fail to deserialize
+     * and tracking them for logging/notification.
+     *
+     * @param releases List of DiscogsReleaseJson objects from API
+     * @param totalPages Total pages in the response
+     * @param totalItems Total items in the collection
+     * @return CollectionResult with successfully deserialized items and details of skipped records
+     */
+    private fun deserializeReleasesWithErrorHandling(
+        releases: List<DiscogsReleaseJson>,
+        totalPages: Int,
+        totalItems: Int,
+    ): CollectionResult {
+        val items = mutableListOf<CollectionItem>()
+        val skipped = mutableListOf<SkippedRecord>()
+
+        for (release in releases) {
+            try {
+                val item = CollectionItem.fromJson(release)
+                items.add(item)
+            } catch (e: Exception) {
+                val title = try {
+                    release.basicInformation.title
+                } catch (e2: Exception) {
+                    "Unknown Title"
+                }
+                println("DEBUG: Failed to deserialize record ID ${release.id} ($title): ${e.message}")
+                skipped.add(
+                    SkippedRecord(
+                        id = release.id,
+                        title = title,
+                        error = e.message ?: "Unknown error"
+                    )
+                )
+            }
+        }
+
+        return CollectionResult(
+            items = items,
+            totalPages = totalPages,
+            totalItems = totalItems,
+            skippedRecords = skipped.size,
+            skippedRecordDetails = skipped,
+        )
+    }
 }
 
 // ── Supporting types ──────────────────────────────────────────────────────────
@@ -345,6 +410,15 @@ data class CollectionResult(
     val items: List<CollectionItem>,
     val totalPages: Int,
     val totalItems: Int,
+    val skippedRecords: Int = 0,
+    val skippedRecordDetails: List<SkippedRecord> = emptyList(),
+)
+
+/** Details about a record that failed to deserialize */
+data class SkippedRecord(
+    val id: Int,
+    val title: String,
+    val error: String,
 )
 
 class DiscogsException(message: String) : Exception(message)
