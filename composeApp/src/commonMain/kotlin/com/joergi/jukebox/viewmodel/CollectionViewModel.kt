@@ -74,7 +74,8 @@ data class CollectionUiState(
         get() {
             if (selectedFilter == null) return items
             return items.filter { item ->
-                val first = item.artists.firstOrNull()
+                val first =
+                    item.artists.firstOrNull()
                     ?.trimStart()
                     ?.firstOrNull()
                     ?: item.title.firstOrNull()
