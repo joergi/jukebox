@@ -3,13 +3,17 @@ package com.joergi.jukebox.ui.screen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.joergi.jukebox.model.SyncState
 import com.joergi.jukebox.updateGlobalDarkMode
 import com.joergi.jukebox.viewmodel.CollectionViewModel
 import com.joergi.jukebox.viewmodel.DiscogsAuthViewModel
@@ -119,27 +124,48 @@ fun SettingsScreen(
                 }
             }
 
+            item { HorizontalDivider() }
+
             item {
-                // Disconnect account button
+                // Resync collection button
+                val syncState = uiState.syncState
+                val isSyncing = syncState is SyncState.FetchingNewest ||
+                    syncState is SyncState.Validating ||
+                    syncState is SyncState.FullResync
                 Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.Start,
+                        .padding(top = 8.dp),
                 ) {
-                    TextButton(
-                        onClick = {
-                            authViewModel.disconnect()
-                            onDisconnect()
-                        }
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Disconnect from Discogs",
-                            color = MaterialTheme.colorScheme.error,
+                            text = "Resync collection",
+                            style = MaterialTheme.typography.titleMedium,
                         )
+                        Text(
+                            text = if (isSyncing) "Syncing…" else "Manually trigger a collection sync",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { viewModel.performManualSync() },
+                        enabled = uiState.items.isNotEmpty() && !isSyncing,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Sync")
                     }
                 }
             }
+
+            item { HorizontalDivider() }
 
             item {
                 Text(
@@ -183,6 +209,30 @@ fun SettingsScreen(
                         TextButton(onClick = { viewModel.clearSelectedRecordsHistory() }) {
                             Text("Clear history")
                         }
+                    }
+                }
+            }
+
+            item { HorizontalDivider() }
+
+            item {
+                // Disconnect account button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    TextButton(
+                        onClick = {
+                            authViewModel.disconnect()
+                            onDisconnect()
+                        }
+                    ) {
+                        Text(
+                            text = "Disconnect from Discogs",
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
             }

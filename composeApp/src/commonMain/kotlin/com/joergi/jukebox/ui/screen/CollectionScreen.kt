@@ -33,11 +33,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -153,14 +151,6 @@ fun CollectionScreen(
                             }
                         }
                     },
-                    navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                            )
-                        }
-                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),
@@ -173,16 +163,6 @@ fun CollectionScreen(
                             Icon(
                                 imageVector = Icons.Default.Casino,
                                 contentDescription = "Random record",
-                            )
-                        }
-                        // Manual refresh button
-                        IconButton(
-                            onClick = { viewModel.performManualSync() },
-                            enabled = uiState.items.isNotEmpty() && syncState !is SyncState.FetchingNewest && syncState !is SyncState.Validating && syncState !is SyncState.FullResync,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Manual refresh",
                             )
                         }
                         // Settings button
