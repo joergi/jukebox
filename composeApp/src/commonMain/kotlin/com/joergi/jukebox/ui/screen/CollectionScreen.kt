@@ -496,7 +496,7 @@ private fun CollectionList(
 // ── Single row ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CollectionItemRow(
+fun CollectionItemRow(
     item: CollectionItem,
     isHighlighted: Boolean = false,
 ) {
@@ -579,7 +579,7 @@ private fun CollectionItemRow(
 // ── Thumbnail ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun Thumbnail(thumbUrl: String?) {
+fun Thumbnail(thumbUrl: String?) {
     val context = LocalPlatformContext.current
     Box(
         modifier = Modifier.size(64.dp),

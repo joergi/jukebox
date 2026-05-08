@@ -181,21 +181,7 @@ fun SettingsScreen(
             }
 
             items(uiState.selectedRecordsHistory) { record ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                ) {
-                    Text(
-                        text = record.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = record.artists.joinToString(", ").ifBlank { "Unknown Artist" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                CollectionItemRow(item = record)
             }
 
             item {
